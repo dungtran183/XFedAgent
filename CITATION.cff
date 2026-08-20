@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the accompanying article."
+title: "XFedAgent: reference implementation and reproducibility manifest"
+type: software
+license: MIT
+authors:
+  - family-names: Tran
+    given-names: Tuan-Dung
+    orcid: "https://orcid.org/0000-0003-1156-7072"
+    affiliation: "University of Information Technology, VNU-HCM"
+  - family-names: Bui
+    given-names: Phuong-Dai
+    orcid: "https://orcid.org/0009-0005-6138-9413"
+    affiliation: "University of Information Technology, VNU-HCM"
+  - family-names: Pham
+    given-names: Van-Hau
+    orcid: "https://orcid.org/0000-0003-3147-3356"
+    affiliation: "University of Information Technology, VNU-HCM"
+repository-code: "https://github.com/dungtran183/xfedagent"
+preferred-citation:
+  type: article
+  title: "XFedAgent: Efficient and Verifiable Cross-Chain Federated Learning for Trustworthy IoT Edge Intelligence"
+  journal: "IEEE Internet of Things Journal"
+  year: 2026
+  authors:
+    - family-names: Tran
+      given-names: Tuan-Dung
+    - family-names: Bui
+      given-names: Phuong-Dai
+    - family-names: Pham
+      given-names: Van-Hau

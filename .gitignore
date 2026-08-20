@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+results/
+data/
+artifacts/
+node_modules/
+package-lock.json
+*.pt
+.venv/
+venv/
+.DS_Store

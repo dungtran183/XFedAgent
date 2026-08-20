@@ -1,0 +1,98 @@
+{
+  "name": "full-mimic-cloud",
+  "data": {
+    "source": "csv_timeseries",
+    "samples": 26424,
+    "clients": 10,
+    "timesteps": 24,
+    "features": 17,
+    "validation_pool_size": 1000,
+    "validation_fraction": 0.15,
+    "test_fraction": 0.15,
+    "dirichlet_alpha": 0.5,
+    "csv_path": "data/processed/mimic_mortality_24h.csv",
+    "label_column": "mortality_48h",
+    "patient_column": "subject_id"
+  },
+  "model": {
+    "kind": "cnn1d",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "local_epochs": 5,
+    "batch_size": 32,
+    "hidden_channels": [
+      8,
+      16,
+      32
+    ],
+    "quantization_bits": 8,
+    "copy_epsilon": 0.0001
+  },
+  "pov": {
+    "backend": "software",
+    "threshold": 0.75,
+    "validation_size": 100,
+    "tolerance": 0.03,
+    "rotation": "per_round",
+    "hash_algorithm": "sha3_256",
+    "proof_seconds_per_sample": 0.184,
+    "snarkjs_bin": "snarkjs",
+    "circuit_wasm": null,
+    "proving_key": null
+  },
+  "federation": {
+    "rounds": 100,
+    "clients_per_round": 10,
+    "byzantine_fraction": 0.3,
+    "attacks": [
+      "label_flip",
+      "random_gradient",
+      "alie",
+      "minmax",
+      "backdoor"
+    ],
+    "seed": 0,
+    "reputation_initial": 0.5,
+    "reputation_min": 0.2,
+    "reputation_reward_alpha": 0.1,
+    "reputation_penalty_beta": 0.5
+  },
+  "relay": {
+    "enabled": true,
+    "chains": [
+      "simulated-sepolia",
+      "simulated-base-sepolia"
+    ],
+    "relayers": 7,
+    "faulty_relayers": 2,
+    "source_finality_blocks": 6,
+    "source_block_seconds": 12.8,
+    "destination_finality_seconds": 2.0,
+    "gas_verify_base": 207000,
+    "gas_reputation_update": 78000
+  },
+  "energy": {
+    "enabled": true,
+    "local_training_watts": 5.2,
+    "proving_watts": 5.8,
+    "communication_watts": 3.8,
+    "idle_watts": 2.7
+  },
+  "output": {
+    "directory": "results",
+    "save_round_models": false
+  },
+  "toolchain": {
+    "require_snarkjs": true,
+    "require_qemu": true,
+    "require_ipfs": true,
+    "require_hardhat": true
+  },
+  "ablation": {
+    "pov_enabled": true,
+    "copy_detector_enabled": true,
+    "reputation_enabled": true,
+    "rotation_enabled": true,
+    "cross_chain_enabled": true
+  }
+}

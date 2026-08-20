@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xfedagent"
+version = "0.1.0"
+description = "Proof-of-Validation federated learning framework for cross-chain edge-agent simulations"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "scikit-learn>=1.4",
+  "torch>=2.2"
+]
+
+[project.scripts]
+xfedagent = "xfedagent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
