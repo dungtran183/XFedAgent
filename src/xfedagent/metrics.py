@@ -140,3 +140,43 @@ def passes_class_aware(
     sens_ok = counts.tp >= (tau_sens - tolerance) * counts.positives
     spec_ok = counts.tn >= (tau_spec - tolerance) * counts.negatives
     return bool(sens_ok and spec_ok)
+
+
+def predicate_margin(
+    predicate: str,
+    accuracy: float,
+    sensitivity: float,
+    specificity: float,
+    threshold: float,
+    threshold_sensitivity: float,
+    threshold_specificity: float,
+) -> float:
+    """Scalar utility margin by which a submission clears the admission predicate.
+
+    Mirrors Eq. (5) of the paper. Under ``raw_accuracy`` the margin is the
+    accuracy surplus over ``threshold``. Under ``class_aware`` it is the
+    *smaller* of the two per-class surpluses, so an agent cannot bank reputation
+    by excelling on the majority class alone. Clamped at zero: a rejected
+    submission earns nothing.
+    """
+    if predicate == "class_aware":
+        return max(
+            0.0,
+            min(
+                sensitivity - threshold_sensitivity,
+                specificity - threshold_specificity,
+            ),
+        )
+    return max(0.0, accuracy - threshold)
+
+
+def max_predicate_margin(
+    predicate: str,
+    threshold: float,
+    threshold_sensitivity: float,
+    threshold_specificity: float,
+) -> float:
+    """Delta_max of Eq. (6): the largest attainable predicate margin."""
+    if predicate == "class_aware":
+        return 1.0 - max(threshold_sensitivity, threshold_specificity)
+    return 1.0 - threshold

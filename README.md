@@ -114,6 +114,47 @@ nothing. `pov.predicate` selects the gate:
 | `class_aware` (default) | sensitivity and specificity thresholds enforced separately over integer TP/TN/FP/FN, by cross-multiplication so no division is needed |
 | `raw_accuracy` | the original gate, retained to reproduce the earlier configuration |
 
+### Reputation follows the predicate, not raw accuracy
+
+The reputation reward is the *predicate margin*: the amount by which a submission
+clears the gate it was actually judged by (`metrics.predicate_margin`). Under
+`raw_accuracy` that is `acc - tau`. Under `class_aware` it is
+`min(Se - tau_se, Sp - tau_sp)`, the weaker of the two directions, so an agent
+cannot bank reputation by excelling on the majority class alone. The largest
+attainable margin `Delta_max` (`metrics.max_predicate_margin`) is `1 - tau` and
+`1 - max(tau_se, tau_sp)` respectively, which is what instantiates the
+exclusion threshold `q* = alpha*Delta_max / (beta + alpha*Delta_max)`:
+4.8% for the raw gate at 0.75 and 5.7% for the class-aware gate at 0.70/0.70.
+
+### Measuring the two predicates against each other
+
+`configs/predicate-raw-accuracy.json` and `configs/predicate-class-aware.json`
+are identical in seed, partition, model, attack schedule and round count, and
+differ only in the predicate. Both run 60 rounds at prevalence 0.137 against a
+`majority_class` adversary:
+
+```bash
+python3 -m xfedagent run --config configs/predicate-raw-accuracy.json --output results/pacc
+python3 -m xfedagent run --config configs/predicate-class-aware.json  --output results/pbal
+```
+
+| | raw accuracy, tau=0.75 | class-aware 0.70/0.70, balanced |
+|---|---|---|
+| Adversarial submissions admitted | 70.6% | **0.0%** |
+| Rounds with any such admission | 60/60 | **0/60** |
+| Honest submissions rejected | 0.5% | 29.0% |
+| Terminal mean reputation | 0.883 | 0.403 |
+| Global accuracy | 91.9% | 87.9% |
+| Global sensitivity | 0.543 | **0.932** |
+| Global AUC-ROC | 0.953 | **0.967** |
+
+`rounds.csv` carries `honest_false_reject_rate` and `malicious_admission_rate`
+per round, which is what these aggregates are computed from. The honest
+false-rejection cost does not decay with training (32.9% over rounds 0-9 against
+28.3% over rounds 10-59): it tracks partition skew, not early-training
+immaturity. There is no warm-up relaxation in the code and none is needed;
+thresholds are fixed from round 0.
+
 Two settings make the class-aware gate sound rather than merely stricter.
 `pov.balanced_validation` draws the per-round subset with equal class counts, because
 the concentration bound is governed by the *smaller* class count: at prevalence 0.137

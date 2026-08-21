@@ -12,6 +12,7 @@ from .commitments import MerkleCommitter, array_payload, digest_bytes, stable_co
 from .config import ExperimentConfig
 from .data import load_dataset
 from .energy import estimate_energy
+from .metrics import predicate_margin
 from .metrics import summarize
 from .model import TorchModel, aggregate_states, state_to_vector
 from .pov import SoftwarePoVBackend, ValidationRotator
@@ -78,6 +79,10 @@ class ExperimentRunner:
             accepted_clients: list[int] = []
             round_accepted = 0
             round_rejected = 0
+            round_honest_attempts = 0
+            round_honest_rejects = 0
+            round_mal_attempts = 0
+            round_mal_admitted = 0
 
             for client_id in selected:
                 transcript, _ = pov.prove(
@@ -95,11 +100,25 @@ class ExperimentRunner:
                 is_malicious = client_id in malicious
                 if is_malicious:
                     malicious_attempts += 1
+                    round_mal_attempts += 1
                 else:
                     honest_attempts += 1
+                    round_honest_attempts += 1
+                if transcript.accepted and is_malicious:
+                    round_mal_admitted += 1
+                if not transcript.accepted and not is_malicious:
+                    round_honest_rejects += 1
                 if transcript.accepted:
                     if ablation.reputation_enabled:
-                        margin = max(0.0, transcript.accuracy - self.cfg.pov.threshold)
+                        margin = predicate_margin(
+                            self.cfg.pov.predicate,
+                            transcript.accuracy,
+                            transcript.sensitivity,
+                            transcript.specificity,
+                            self.cfg.pov.threshold,
+                            self.cfg.pov.threshold_sensitivity,
+                            self.cfg.pov.threshold_specificity,
+                        )
                         reputations[client_id] = min(
                             1.0,
                             reputations[client_id]
@@ -163,6 +182,12 @@ class ExperimentRunner:
                     "f1": test_metrics.f1,
                     "accepted": round_accepted,
                     "rejected": round_rejected,
+                    "honest_false_reject_rate": (
+                        round_honest_rejects / round_honest_attempts if round_honest_attempts else 0.0
+                    ),
+                    "malicious_admission_rate": (
+                        round_mal_admitted / round_mal_attempts if round_mal_attempts else 0.0
+                    ),
                     "mean_reputation": float(np.mean(list(reputations.values()))),
                     "active_reputations": int(sum(v >= self.cfg.federation.reputation_min for v in reputations.values())),
                     "global_model_root": global_model_root,

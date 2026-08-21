@@ -117,3 +117,64 @@ def test_rotation_changes_the_subset_between_rounds():
     a = set(rot.challenge(0, 42).indices.tolist())
     b = set(rot.challenge(1, 42).indices.tolist())
     assert a != b
+
+
+def test_predicate_margin_class_aware_takes_the_weaker_direction():
+    from xfedagent.metrics import predicate_margin
+
+    # Strong specificity cannot compensate for weak sensitivity.
+    margin = predicate_margin(
+        "class_aware",
+        accuracy=0.95,
+        sensitivity=0.72,
+        specificity=0.99,
+        threshold=0.75,
+        threshold_sensitivity=0.70,
+        threshold_specificity=0.70,
+    )
+    assert margin == pytest.approx(0.02)
+
+
+def test_predicate_margin_is_zero_when_either_direction_fails():
+    from xfedagent.metrics import predicate_margin
+
+    assert predicate_margin(
+        "class_aware",
+        accuracy=0.95,
+        sensitivity=0.60,
+        specificity=0.99,
+        threshold=0.75,
+        threshold_sensitivity=0.70,
+        threshold_specificity=0.70,
+    ) == 0.0
+
+
+def test_predicate_margin_raw_accuracy_matches_the_former_rule():
+    from xfedagent.metrics import predicate_margin
+
+    assert predicate_margin(
+        "raw_accuracy",
+        accuracy=0.86,
+        sensitivity=0.0,
+        specificity=1.0,
+        threshold=0.75,
+        threshold_sensitivity=0.70,
+        threshold_specificity=0.70,
+    ) == pytest.approx(0.11)
+
+
+def test_max_predicate_margin_matches_the_reported_values():
+    from xfedagent.metrics import max_predicate_margin
+
+    assert max_predicate_margin("raw_accuracy", 0.75, 0.70, 0.70) == pytest.approx(0.25)
+    assert max_predicate_margin("class_aware", 0.75, 0.70, 0.70) == pytest.approx(0.30)
+
+
+def test_exclusion_threshold_from_max_margin():
+    """q* = alpha*Delta_max / (beta + alpha*Delta_max), Eq. (10)."""
+    from xfedagent.metrics import max_predicate_margin
+
+    alpha, beta = 0.1, 0.5
+    for predicate, expected in (("raw_accuracy", 0.048), ("class_aware", 0.057)):
+        d = max_predicate_margin(predicate, 0.75, 0.70, 0.70)
+        assert alpha * d / (beta + alpha * d) == pytest.approx(expected, abs=5e-4)
