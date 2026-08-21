@@ -8,9 +8,11 @@ Reference implementation accompanying:
 > Trustworthy AI Agents for IoT (under review).
 
 XFedAgent gates federated model updates on a **Proof-of-Validation (PoV)**: an
-agent proves that the model it committed to reaches an accuracy threshold on a
-validation subset chosen *after* the commitment, rather than proving that it
-executed training honestly. Admitted updates are weighted by an on-chain
+agent proves that the model it committed to clears a class-aware utility
+predicate on a validation subset chosen *after* the commitment, rather than
+proving that it executed training honestly. The predicate enforces sensitivity
+and specificity separately, because a raw-accuracy threshold is satisfiable by a
+constant classifier on an imbalanced cohort (see §3b). Admitted updates are weighted by an on-chain
 reputation score, relayed across two ledgers, and folded into a global model
 whose Merkle root is published for public recomputation.
 
@@ -35,6 +37,7 @@ distinction matters when reading any number it prints:
 | Proof-generation latency | **Modelled** | `proof_seconds_per_sample x validation_size`; *not* a timed SNARK run |
 | Per-round energy (Wh) | **Modelled** | Phase duration x a fixed power envelope (`energy.py`) |
 | Gas cost | **Modelled** | Fixed per-operation constants from `relay.enabled` accounting |
+| Confusion counts, sensitivity, specificity, admission decisions | **Computed** | `metrics.py`, evaluated per submission |
 | Thermal throttling, I/O and memory-bandwidth effects | **Not represented** | Out of scope for a simulation-only study |
 
 Two substitutions are deliberate and are stated in the paper:
