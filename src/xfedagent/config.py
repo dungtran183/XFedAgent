@@ -56,6 +56,11 @@ class PoVConfig:
     predicate: str = "class_aware"
     threshold_sensitivity: float = 0.60
     threshold_specificity: float = 0.60
+    #: Draw the per-round validation subset with equal numbers of each class.
+    #: The concentration bound on the class-aware predicate is governed by the
+    #: smaller class count, so sampling in proportion to a skewed pool makes it
+    #: nearly vacuous; balanced stratification restores it.
+    balanced_validation: bool = True
 
 
 @dataclass(frozen=True)

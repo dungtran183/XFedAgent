@@ -99,6 +99,32 @@ python3 -m xfedagent run --config configs/full.json --output results
 
 ---
 
+## 3b. The admission predicate
+
+A raw-accuracy threshold is unsound on an imbalanced validation set. At the
+MIMIC-III prevalence of 13.7% positives, a classifier that always predicts the
+majority class scores 86.3% and clears `tau=0.75` by 11.3 points while learning
+nothing. `pov.predicate` selects the gate:
+
+| Value | Predicate |
+|---|---|
+| `class_aware` (default) | sensitivity and specificity thresholds enforced separately over integer TP/TN/FP/FN, by cross-multiplication so no division is needed |
+| `raw_accuracy` | the original gate, retained to reproduce the earlier configuration |
+
+Two settings make the class-aware gate sound rather than merely stricter.
+`pov.balanced_validation` draws the per-round subset with equal class counts, because
+the concentration bound is governed by the *smaller* class count: at prevalence 0.137
+only ~14 positives land in a 100-sample subset and the bound is near-vacuous, whereas a
+50/50 draw at τ=0.70 gives a per-round bound of 0.037. Per-round rotation then compounds
+it across rounds.
+
+`data.positive_rate` sets the surrogate's prevalence, so the imbalance can be reproduced
+without the restricted dataset:
+
+```bash
+python3 -m xfedagent run --config configs/synthetic.json --output results
+```
+
 ## 4. Component ablation
 
 `configs/full.json` carries an `ablation` block; every switch defaults to `true`,
@@ -171,7 +197,7 @@ copied verbatim into each run directory, and `summary.json` records a
 |---|---|
 | `data` | 26 424 samples, 10 clients, 24 timesteps, 17 features, validation pool 1 000, Dirichlet α = 0.5, 70/15/15 split |
 | `model` | 1D-CNN, channels 8/16/32, Adam, lr 1e-3, weight decay 1e-4, batch 32, `E = 5` local epochs, 8-bit quantisation, copy ε = 1e-4 |
-| `pov` | threshold τ = 0.75, `|D_val|` = 100, tolerance ε = 0.03, per-round rotation, 0.184 s/sample modelled proving |
+| `pov` | class-aware predicate, τ_sens = τ_spec = 0.70, `|D_val|` = 100 drawn class-balanced, tolerance ε = 0.03, per-round rotation, 0.184 s/sample modelled proving |
 | `federation` | 100 rounds, 10 clients/round, 30 % Byzantine, attacks {label_flip, random_gradient, alie, minmax, backdoor}, r₀ = 0.5, r_min = 0.2, α = 0.1, β = 0.5 |
 | `relay` | 2 chains, 7 relayers, 2 faulty, 6-block source finality at 12.8 s, 2.0 s destination finality, 207 000 + 78 000 gas |
 | `energy` | 5.2 W training, 5.8 W proving, 3.8 W communication, 2.7 W idle |

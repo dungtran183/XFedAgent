@@ -74,10 +74,35 @@ class ValidationRotator:
         seed_material = digest_bytes(f"{master_seed}:{effective_round}:{self.cfg.rotation}".encode("utf-8"), self.cfg.hash_algorithm)
         seed = int(seed_material[:16], 16)
         rng = np.random.default_rng(seed)
-        indices = rng.choice(self.pool_y.size, size=self.cfg.validation_size, replace=False)
+        if self.cfg.balanced_validation:
+            indices = self._balanced_indices(rng)
+        else:
+            indices = rng.choice(self.pool_y.size, size=self.cfg.validation_size, replace=False)
         payload = array_payload(self.pool_x[indices]) + array_payload(self.pool_y[indices])
         root = digest_bytes(payload, self.cfg.hash_algorithm)
         return ValidationChallenge(round_index=round_index, indices=indices, seed_material=seed_material, validation_root=root)
+
+    def _balanced_indices(self, rng: np.random.Generator) -> np.ndarray:
+        """Draw the subset with equal class counts, falling back if a class is short.
+
+        The scarcer class caps how balanced the draw can be; when the pool cannot
+        supply half the subset from one class we take all of it and top up from the
+        other, which is the closest achievable balance.
+        """
+        half = self.cfg.validation_size // 2
+        pos = np.flatnonzero(self.pool_y == 1)
+        neg = np.flatnonzero(self.pool_y == 0)
+        take_pos = min(half, pos.size)
+        take_neg = min(self.cfg.validation_size - take_pos, neg.size)
+        take_pos = min(pos.size, self.cfg.validation_size - take_neg)
+        chosen = np.concatenate(
+            [
+                rng.choice(pos, size=take_pos, replace=False),
+                rng.choice(neg, size=take_neg, replace=False),
+            ]
+        )
+        rng.shuffle(chosen)
+        return chosen
 
     def data_for(self, challenge: ValidationChallenge) -> tuple[np.ndarray, np.ndarray]:
         return self.pool_x[challenge.indices], self.pool_y[challenge.indices]

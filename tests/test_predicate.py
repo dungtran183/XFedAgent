@@ -73,3 +73,47 @@ def test_confusion_counts_partition_the_sample():
     c = confusion_counts(y, p)
     assert c.tp + c.tn + c.fp + c.fn == N
     assert c.positives == int(y.sum())
+
+
+# --------------------------------------------------------------------------
+# Balanced validation sampling
+# --------------------------------------------------------------------------
+import json, pathlib  # noqa: E402
+from xfedagent.config import parse_config  # noqa: E402
+from xfedagent.pov import ValidationRotator  # noqa: E402
+
+
+def _rotator(prevalence: float, balanced: bool, pool: int = 1000):
+    cfg = parse_config(json.loads((pathlib.Path("configs/full.json")).read_text()))
+    object.__setattr__(cfg.pov, "balanced_validation", balanced)
+    rng = np.random.default_rng(0)
+    y = (rng.random(pool) < prevalence).astype(int)
+    x = rng.random((pool, 24, 17)).astype("float32")
+    return ValidationRotator(cfg.pov, x, y), cfg
+
+
+def test_balanced_sampling_ignores_pool_prevalence():
+    rot, cfg = _rotator(PREVALENCE, balanced=True)
+    _, y = rot.data_for(rot.challenge(0, 42))
+    assert y.size == cfg.pov.validation_size
+    assert int(y.sum()) == cfg.pov.validation_size // 2
+
+
+def test_proportional_sampling_inherits_pool_prevalence():
+    rot, cfg = _rotator(PREVALENCE, balanced=False)
+    _, y = rot.data_for(rot.challenge(0, 42))
+    assert int(y.sum()) < cfg.pov.validation_size // 2
+
+
+def test_balanced_sampling_degrades_gracefully_when_a_class_is_scarce():
+    """With too few positives the draw takes all of them and tops up."""
+    rot, cfg = _rotator(0.01, balanced=True, pool=1000)
+    _, y = rot.data_for(rot.challenge(0, 42))
+    assert y.size == cfg.pov.validation_size
+
+
+def test_rotation_changes_the_subset_between_rounds():
+    rot, _ = _rotator(PREVALENCE, balanced=True)
+    a = set(rot.challenge(0, 42).indices.tolist())
+    b = set(rot.challenge(1, 42).indices.tolist())
+    assert a != b
