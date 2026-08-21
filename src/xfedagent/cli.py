@@ -5,7 +5,14 @@ import argparse
 import shutil
 import sys
 
-from .ablation import DEFAULT_ARMS, format_latex_table, parse_seeds, run_ablation
+from .ablation import (
+    DEFAULT_ARMS,
+    factorial_effects,
+    format_factorial_table,
+    format_latex_table,
+    parse_seeds,
+    run_ablation,
+)
 from .config import load_config, validate_config
 from .runner import ExperimentRunner
 
@@ -31,6 +38,11 @@ def main(argv: list[str] | None = None) -> None:
     ablation_parser.add_argument("--output", default="results/ablation")
     ablation_parser.add_argument(
         "--latex", action="store_true", help="also print a LaTeX booktabs table body"
+    )
+    ablation_parser.add_argument(
+        "--factorial",
+        action="store_true",
+        help="report 2x2 main effects and the interaction for the PoV/reputation design",
     )
 
     validate_parser = subparsers.add_parser("validate-config")
@@ -62,6 +74,18 @@ def main(argv: list[str] | None = None) -> None:
         if args.latex:
             print("--- LaTeX table body ---")
             print(format_latex_table(manifest))
+        if args.factorial:
+            effects = factorial_effects(manifest["aggregate"])
+            print("--- 2x2 factorial effects (percentage points) ---")
+            for key in (
+                "main_effect_pov",
+                "main_effect_reputation",
+                "interaction",
+                "additive_prediction",
+                "observed_both",
+            ):
+                print(f"{key}={effects[key] * 100:+.2f}")
+            print(format_factorial_table(effects))
         return
     if args.command == "validate-config":
         cfg = load_config(args.config)

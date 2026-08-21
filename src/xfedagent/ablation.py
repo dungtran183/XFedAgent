@@ -39,7 +39,8 @@ _FIELD_FOR = {
 
 #: The default arm set reported in the paper's component-ablation table.
 #: ``full`` is the complete framework; each remaining arm removes one component,
-#: and ``no-pov+rep`` removes the two that the paper claims act synergistically.
+#: and ``no-pov+rep`` removes both factors of the two-factor design, so that
+#: ``full``, ``no-pov``, ``no-rep`` and ``no-pov+rep`` form its four cells.
 DEFAULT_ARMS: tuple[str, ...] = (
     "full",
     "no-pov",
@@ -221,3 +222,84 @@ def format_latex_table(manifest: dict) -> str:
             f"{row['accuracy_delta_pp']:+.1f} \\\\"
         )
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# Two-factor (2x2) analysis
+# --------------------------------------------------------------------------
+#: The four cells of the PoV-gate x reputation design, keyed by arm label.
+FACTORIAL_CELLS: dict[str, tuple[bool, bool]] = {
+    # arm label      -> (pov_on, rep_on)
+    "no-pov+rep": (False, False),
+    "no-pov": (False, True),
+    "no-rep": (True, False),
+    "full": (True, True),
+}
+
+
+def factorial_effects(aggregate: list[dict], metric: str = "accuracy_mean") -> dict:
+    """Main effects and interaction for the PoV-gate x reputation design.
+
+    A 2x2 design has four cells. Writing ``y[p][r]`` for the mean metric with the
+    gate at level ``p`` and reputation at level ``r``, the main effect of a factor
+    is its average simple effect across the levels of the other factor, and the
+    interaction is the difference between the two simple effects:
+
+        main(PoV) = ((y[1][0] - y[0][0]) + (y[1][1] - y[0][1])) / 2
+        main(rep) = ((y[0][1] - y[0][0]) + (y[1][1] - y[1][0])) / 2
+        interaction = y[1][1] - y[1][0] - y[0][1] + y[0][0]
+
+    A negative interaction means the two mechanisms are partially redundant: the
+    second one added recovers less than it would on its own. That is the expected
+    sign whenever both defend against overlapping failure modes, or whenever the
+    combined arm approaches a ceiling that caps additivity. Reporting the sum of
+    the two simple effects as though it were the combined effect overstates the
+    benefit, so this function returns the interaction alongside the main effects.
+    """
+    by_arm = {row["arm"]: row for row in aggregate}
+    missing = sorted(set(FACTORIAL_CELLS) - set(by_arm))
+    if missing:
+        raise ValueError(
+            "factorial analysis needs all four cells; missing arm(s): "
+            + ", ".join(missing)
+        )
+
+    y = {}
+    for arm, (pov_on, rep_on) in FACTORIAL_CELLS.items():
+        if metric not in by_arm[arm]:
+            raise ValueError(f"metric {metric!r} absent from arm {arm!r}")
+        y[(pov_on, rep_on)] = float(by_arm[arm][metric])
+
+    simple_pov_norep = y[(True, False)] - y[(False, False)]
+    simple_pov_rep = y[(True, True)] - y[(False, True)]
+    simple_rep_nopov = y[(False, True)] - y[(False, False)]
+    simple_rep_pov = y[(True, True)] - y[(True, False)]
+    interaction = y[(True, True)] - y[(True, False)] - y[(False, True)] + y[(False, False)]
+
+    return {
+        "metric": metric,
+        "cells": {f"pov={int(p)},rep={int(r)}": v for (p, r), v in y.items()},
+        "simple_effect_pov_without_reputation": simple_pov_norep,
+        "simple_effect_pov_with_reputation": simple_pov_rep,
+        "simple_effect_reputation_without_pov": simple_rep_nopov,
+        "simple_effect_reputation_with_pov": simple_rep_pov,
+        "main_effect_pov": (simple_pov_norep + simple_pov_rep) / 2.0,
+        "main_effect_reputation": (simple_rep_nopov + simple_rep_pov) / 2.0,
+        "interaction": interaction,
+        "additive_prediction": (
+            y[(False, False)] + simple_pov_norep + simple_rep_nopov
+        ),
+        "observed_both": y[(True, True)],
+    }
+
+
+def format_factorial_table(effects: dict, scale: float = 100.0) -> str:
+    """Render the 2x2 effects as a LaTeX booktabs body, in the paper's units."""
+    e = effects
+    return "\n".join(
+        [
+            f"Main effect, PoV gate   & ${e['main_effect_pov'] * scale:+.1f}$ \\\\",
+            f"Main effect, reputation & ${e['main_effect_reputation'] * scale:+.1f}$ \\\\",
+            f"Interaction             & ${e['interaction'] * scale:+.1f}$ \\\\",
+        ]
+    )

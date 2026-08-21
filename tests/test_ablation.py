@@ -74,3 +74,49 @@ def test_arm_config_does_not_mutate_the_base(synthetic_config):
     before = synthetic_config.to_dict()
     _arm_config(synthetic_config, parse_arm("no-xchain"), seed=5)
     assert synthetic_config.to_dict() == before
+
+
+# --------------------------------------------------------------------------
+# Two-factor analysis
+# --------------------------------------------------------------------------
+from xfedagent.ablation import factorial_effects  # noqa: E402
+
+#: The four MIMIC-III cells reported in the manuscript, as fractions.
+_PAPER_CELLS = [
+    {"arm": "no-pov+rep", "accuracy_mean": 0.487},
+    {"arm": "no-pov", "accuracy_mean": 0.684},
+    {"arm": "no-rep", "accuracy_mean": 0.762},
+    {"arm": "full", "accuracy_mean": 0.831},
+]
+
+
+def test_factorial_reproduces_the_reported_effects():
+    e = factorial_effects(_PAPER_CELLS)
+    assert round(e["main_effect_pov"] * 100, 1) == 21.1
+    assert round(e["main_effect_reputation"] * 100, 1) == 13.3
+    assert round(e["interaction"] * 100, 1) == -12.8
+
+
+def test_interaction_is_negative_so_effects_are_not_additive():
+    """Guards the claim the manuscript makes: the mechanisms are partially redundant."""
+    e = factorial_effects(_PAPER_CELLS)
+    assert e["interaction"] < 0
+    assert e["additive_prediction"] > e["observed_both"]
+
+
+def test_interaction_is_symmetric_in_the_two_factors():
+    e = factorial_effects(_PAPER_CELLS)
+    pov_gain_from_rep = e["simple_effect_pov_with_reputation"] - e["simple_effect_pov_without_reputation"]
+    rep_gain_from_pov = e["simple_effect_reputation_with_pov"] - e["simple_effect_reputation_without_pov"]
+    assert abs(pov_gain_from_rep - rep_gain_from_pov) < 1e-9
+    assert abs(pov_gain_from_rep - e["interaction"]) < 1e-9
+
+
+def test_factorial_requires_all_four_cells():
+    with pytest.raises(ValueError, match="missing arm"):
+        factorial_effects(_PAPER_CELLS[:3])
+
+
+def test_factorial_rejects_an_absent_metric():
+    with pytest.raises(ValueError, match="absent from arm"):
+        factorial_effects(_PAPER_CELLS, metric="auc_roc_mean")

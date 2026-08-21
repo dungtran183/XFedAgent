@@ -128,7 +128,29 @@ python3 -m xfedagent ablation \
 Arms compose: `no-pov+rep` removes both. The sweep writes
 `ablation_runs.csv` (one row per run), `ablation_summary.csv` (mean ± sd per arm
 with the accuracy delta against `full`), and `ablation_manifest.json`. `--latex`
-additionally prints a `booktabs` table body.
+prints a `booktabs` table body.
+
+### Two-factor analysis
+
+`full`, `no-pov`, `no-rep` and `no-pov+rep` are the four cells of a 2x2 design
+over the utility gate and reputation weighting. Pass `--factorial` to report its
+main effects and interaction:
+
+```bash
+python3 -m xfedagent ablation --config configs/full.json \
+  --arms full,no-pov,no-rep,no-pov+rep --seeds 0-9 \
+  --output results/ablation --factorial
+```
+
+The **main effect** of a factor is its average simple effect across the levels of
+the other factor; the **interaction** is the difference between the two simple
+effects. A negative interaction means the mechanisms are partially redundant, so
+adding the second recovers less than it would alone. Report the main effects and
+the interaction rather than summing the two simple effects, which overstates the
+combined benefit. On the reported MIMIC-III runs the effects are `+21.1` pp for
+the gate, `+13.3` pp for reputation, and `-12.8` pp for the interaction: the
+additive prediction of `95.9%` exceeds the `86.2%` that the same quantised model
+reaches on clean data, so the design saturates against that ceiling.
 
 > **Configure the sweep so honest agents can clear the gate.** The PoV threshold
 > (`pov.threshold`, default 0.75) rejects *every* update — honest and malicious
