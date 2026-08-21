@@ -19,7 +19,7 @@ import torch
 
 from .commitments import array_payload, digest_bytes, quantize_vector
 from .config import AblationConfig, ModelConfig, PoVConfig
-from .metrics import BinaryMetrics
+from .metrics import BinaryMetrics, confusion_counts, passes_class_aware, passes_raw_accuracy
 from .model import TorchModel, state_to_vector
 
 
@@ -41,6 +41,10 @@ class ProofTranscript:
     accuracy: float
     threshold: float
     copy_distance: float
+    sensitivity: float
+    specificity: float
+    balanced_accuracy: float
+    predicate: str
     accepted: bool
     backend: str
     proof_seconds: float
@@ -105,6 +109,8 @@ class SoftwarePoVBackend:
     ) -> tuple[ProofTranscript, BinaryMetrics]:
         start = time.perf_counter()
         metrics = model.evaluate_state(client_state, validation_x, validation_y)
+        probabilities = model.predict_probabilities(client_state, validation_x)
+        counts = confusion_counts(validation_y, probabilities)
         vector = state_to_vector(client_state)
         quantized, scale = quantize_vector(vector, self.model_cfg.quantization_bits)
         model_payload = array_payload(quantized) + np.asarray([scale], dtype=np.float64).tobytes()
@@ -112,11 +118,19 @@ class SoftwarePoVBackend:
         copy_distance = float(np.linalg.norm(vector - state_to_vector(global_state)))
         # Ablations: without the PoV utility gate every update is admitted; without
         # the in-circuit copy detector a replayed global model is no longer rejected.
-        meets_threshold = (
-            metrics.accuracy + self.cfg.tolerance >= self.cfg.threshold
-            if self.ablation.pov_enabled
-            else True
-        )
+        if not self.ablation.pov_enabled:
+            meets_threshold = True
+        elif self.cfg.predicate == "class_aware":
+            meets_threshold = passes_class_aware(
+                counts,
+                self.cfg.threshold_sensitivity,
+                self.cfg.threshold_specificity,
+                self.cfg.tolerance,
+            )
+        else:
+            meets_threshold = passes_raw_accuracy(
+                counts, self.cfg.threshold, self.cfg.tolerance
+            )
         not_a_copy = (
             copy_distance >= self.model_cfg.copy_epsilon
             if self.ablation.copy_detector_enabled
@@ -142,6 +156,10 @@ class SoftwarePoVBackend:
             accuracy=metrics.accuracy,
             threshold=self.cfg.threshold,
             copy_distance=copy_distance,
+            sensitivity=counts.sensitivity,
+            specificity=counts.specificity,
+            balanced_accuracy=counts.balanced_accuracy,
+            predicate=self.cfg.predicate,
             accepted=accepted,
             backend=self.cfg.backend,
             proof_seconds=proof_seconds,

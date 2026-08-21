@@ -13,6 +13,12 @@ def poison_labels(y: np.ndarray, attack_names: tuple[str, ...], rng: np.random.G
     if "label_flip" in attack_names:
         mask = rng.random(result.size) < 0.40
         result[mask] = 1 - result[mask]
+    if "majority_class" in attack_names:
+        # Collapse every local label onto the majority class. Training on this
+        # yields a constant classifier, which is the cheapest model that still
+        # clears a raw-accuracy gate set below the majority prevalence.
+        counts = np.bincount(result, minlength=2)
+        result[:] = int(np.argmax(counts))
     return result
 
 

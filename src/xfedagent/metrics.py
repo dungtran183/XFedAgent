@@ -48,3 +48,95 @@ def summarize(values: list[float]) -> dict[str, float]:
         "max": float(np.max(arr)),
     }
 
+
+
+@dataclass(frozen=True)
+class ConfusionCounts:
+    """Integer confusion counts, the quantities a PoV circuit can expose cheaply.
+
+    A ZK circuit cannot divide, so a class-aware admission predicate is stated over
+    these four integers and enforced by cross-multiplication. Exposing the counts
+    rather than a ratio also keeps the public instance integral, which matters
+    because every public input must be a field element.
+    """
+
+    tp: int
+    tn: int
+    fp: int
+    fn: int
+
+    @property
+    def positives(self) -> int:
+        return self.tp + self.fn
+
+    @property
+    def negatives(self) -> int:
+        return self.tn + self.fp
+
+    @property
+    def accuracy(self) -> float:
+        total = self.tp + self.tn + self.fp + self.fn
+        return (self.tp + self.tn) / total if total else 0.0
+
+    @property
+    def sensitivity(self) -> float:
+        return self.tp / self.positives if self.positives else 0.0
+
+    @property
+    def specificity(self) -> float:
+        return self.tn / self.negatives if self.negatives else 0.0
+
+    @property
+    def balanced_accuracy(self) -> float:
+        return 0.5 * (self.sensitivity + self.specificity)
+
+    def to_dict(self) -> dict[str, int]:
+        return asdict(self)
+
+
+def confusion_counts(y_true: np.ndarray, probabilities: np.ndarray) -> ConfusionCounts:
+    y_true = np.asarray(y_true).astype(int)
+    y_pred = (np.asarray(probabilities, dtype=np.float64) >= 0.5).astype(int)
+    return ConfusionCounts(
+        tp=int(np.sum((y_pred == 1) & (y_true == 1))),
+        tn=int(np.sum((y_pred == 0) & (y_true == 0))),
+        fp=int(np.sum((y_pred == 1) & (y_true == 0))),
+        fn=int(np.sum((y_pred == 0) & (y_true == 1))),
+    )
+
+
+def passes_raw_accuracy(counts: ConfusionCounts, tau: float, tolerance: float = 0.0) -> bool:
+    """The original PoV predicate: raw accuracy at or above ``tau``.
+
+    On an imbalanced validation set this is satisfiable by a constant classifier:
+    predicting the majority class always yields accuracy equal to the majority
+    prevalence, which exceeds ``tau`` whenever ``tau`` is below that prevalence.
+    """
+    return counts.accuracy + tolerance >= tau
+
+
+def passes_class_aware(
+    counts: ConfusionCounts,
+    tau_sens: float,
+    tau_spec: float,
+    tolerance: float = 0.0,
+) -> bool:
+    """Class-aware predicate: sensitivity and specificity thresholds, both enforced.
+
+    Stated over integer counts by cross-multiplication so that no division is
+    required, which is how the circuit enforces it:
+
+        TP * denom_s >= ceil((tau_sens - tol) * denom_s) * (TP + FN)   [sensitivity]
+        TN * denom_p >= ceil((tau_spec - tol) * denom_p) * (TN + FP)   [specificity]
+
+    Here the equivalent rational comparisons are performed in floating point; the
+    circuit uses the fixed-point numerator/denominator form of the same inequality.
+    A constant classifier fails whichever inequality corresponds to the class it
+    never predicts, because that class contributes a zero numerator.
+    """
+    if counts.positives == 0 or counts.negatives == 0:
+        # An all-one-class validation subset cannot certify both directions.
+        return False
+    sens_ok = counts.tp >= (tau_sens - tolerance) * counts.positives
+    spec_ok = counts.tn >= (tau_spec - tolerance) * counts.negatives
+    return bool(sens_ok and spec_ok)

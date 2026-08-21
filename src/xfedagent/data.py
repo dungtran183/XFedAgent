@@ -66,7 +66,9 @@ def synthetic_mimic_dataset(cfg: DataConfig, seed: int) -> DatasetBundle:
         + 0.50 * risk_features[:, 5 % features]
         + rng.normal(0.0, 0.25, size=n)
     )
-    threshold = np.quantile(risk, 0.50)
+    # Quantile at 1 - positive_rate makes the positive class as rare as the
+    # configured prevalence, so an imbalanced surrogate can be generated.
+    threshold = np.quantile(risk, 1.0 - cfg.positive_rate)
     y = (risk > threshold).astype(np.int64)
 
     x = _zscore(x)

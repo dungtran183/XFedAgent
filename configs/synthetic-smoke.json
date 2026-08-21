@@ -38,7 +38,10 @@
     "proof_seconds_per_sample": 0.184,
     "snarkjs_bin": "snarkjs",
     "circuit_wasm": null,
-    "proving_key": null
+    "proving_key": null,
+    "predicate": "class_aware",
+    "threshold_sensitivity": 0.6,
+    "threshold_specificity": 0.6
   },
   "federation": {
     "rounds": 6,

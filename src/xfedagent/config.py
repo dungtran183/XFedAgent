@@ -20,6 +20,9 @@ class DataConfig:
     csv_path: str | None = None
     label_column: str = "label"
     patient_column: str = "patient_id"
+    #: Positive-class prevalence for the synthetic surrogate. 0.5 gives a balanced
+    #: cohort; set it to the real cohort's prevalence to reproduce its imbalance.
+    positive_rate: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,13 @@ class PoVConfig:
     snarkjs_bin: str = "snarkjs"
     circuit_wasm: str | None = None
     proving_key: str | None = None
+    #: "raw_accuracy" reproduces the original gate; "class_aware" enforces
+    #: sensitivity and specificity separately. The class-aware predicate is the
+    #: default because a raw-accuracy threshold below the majority prevalence is
+    #: satisfiable by a constant classifier on an imbalanced validation set.
+    predicate: str = "class_aware"
+    threshold_sensitivity: float = 0.60
+    threshold_specificity: float = 0.60
 
 
 @dataclass(frozen=True)
@@ -215,12 +225,20 @@ def validate_config(cfg: ExperimentConfig) -> None:
         raise ValueError("validation_size cannot exceed validation_pool_size")
     if not 0.0 < cfg.pov.threshold < 1.0:
         raise ValueError("pov.threshold must be in (0, 1)")
+    if cfg.pov.predicate not in {"raw_accuracy", "class_aware"}:
+        raise ValueError("pov.predicate must be raw_accuracy or class_aware")
+    for name in ("threshold_sensitivity", "threshold_specificity"):
+        value = getattr(cfg.pov, name)
+        if not 0.0 < value < 1.0:
+            raise ValueError(f"pov.{name} must be in (0, 1)")
     if cfg.pov.backend not in {"software", "snarkjs"}:
         raise ValueError("pov.backend must be software or snarkjs")
     if cfg.pov.backend == "snarkjs" and (cfg.pov.circuit_wasm is None or cfg.pov.proving_key is None):
         raise ValueError("snarkjs backend requires pov.circuit_wasm and pov.proving_key")
     if cfg.relay.enabled and cfg.relay.relayers <= 3 * cfg.relay.faulty_relayers:
         raise ValueError("relay requires relayers > 3 * faulty_relayers")
+    if not 0.0 < cfg.data.positive_rate < 1.0:
+        raise ValueError("data.positive_rate must be in (0, 1)")
     if cfg.model.quantization_bits < 2 or cfg.model.quantization_bits > 16:
         raise ValueError("quantization_bits must be in [2, 16]")
     if cfg.ablation.cross_chain_enabled and not cfg.relay.enabled:
