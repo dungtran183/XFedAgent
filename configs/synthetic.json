@@ -2,7 +2,7 @@
   "name": "synthetic-surrogate",
   "data": {
     "source": "synthetic_mimic",
-    "samples": 26424,
+    "samples": 27344,
     "clients": 10,
     "timesteps": 24,
     "features": 17,

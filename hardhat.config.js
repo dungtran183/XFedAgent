@@ -7,7 +7,11 @@ module.exports = {
       optimizer: {
         enabled: true,
         runs: 200
-      }
+      },
+      // TrustAnchor.submitUpdate carries the full public instance plus the proof,
+      // which exceeds what the legacy codegen can hold on the EVM stack. The IR
+      // pipeline compiles it without altering the interface.
+      viaIR: true
     }
   },
   paths: {

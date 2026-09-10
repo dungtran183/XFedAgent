@@ -14,12 +14,16 @@ contract RelayBridge {
         threshold = threshold_;
         for (uint256 i = 0; i < relayers.length; i++) {
             require(relayers[i] != address(0), "zero relayer");
+            require(!isRelayer[relayers[i]], "duplicate relayer");
             isRelayer[relayers[i]] = true;
         }
     }
 
     function accept(bytes calldata message, bytes[] calldata signatures) external returns (bytes32 messageHash) {
-        messageHash = keccak256(message);
+        // Signatures are bound to this destination chain and bridge deployment.
+        // Relayers attest the source event/finality in `message`; this contract
+        // verifies their quorum, not the source consensus itself.
+        messageHash = keccak256(abi.encode(block.chainid, address(this), keccak256(message)));
         require(!consumed[messageHash], "message consumed");
         bytes32 signedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
         address previous = address(0);
@@ -51,7 +55,9 @@ contract RelayBridge {
             v += 27;
         }
         require(v == 27 || v == 28, "bad signature v");
-        return ecrecover(digest, v, r, s);
+        require(uint256(s) <= 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0, "noncanonical signature s");
+        address signer = ecrecover(digest, v, r, s);
+        require(signer != address(0), "invalid signature");
+        return signer;
     }
 }
-

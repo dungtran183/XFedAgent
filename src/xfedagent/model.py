@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 import time
+import json
 
 import numpy as np
 import torch
@@ -10,6 +11,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from .config import ModelConfig
+from .commitments import array_payload, digest_bytes
 from .metrics import BinaryMetrics, binary_metrics
 
 
@@ -44,14 +46,29 @@ class TrainResult:
 
 
 class TorchModel:
-    def __init__(self, cfg: ModelConfig, features: int, timesteps: int, seed: int) -> None:
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        features: int,
+        timesteps: int,
+        seed: int,
+        decision_threshold: float = 0.5,
+    ) -> None:
         if cfg.kind != "cnn1d":
             raise ValueError(f"unsupported model kind: {cfg.kind}")
         torch.manual_seed(seed)
         self.cfg = cfg
         self.features = features
         self.timesteps = timesteps
-        self.device = torch.device("cpu")
+        # Every accuracy, sensitivity and specificity this model reports is read at
+        # the same operating point the PoV gate certifies, so a run cannot claim one
+        # threshold in the proof and score itself at another. AUC is unaffected.
+        self.decision_threshold = decision_threshold
+        # Kaggle kernels can provide a CUDA accelerator, while unit tests and
+        # small smoke runs remain CPU-only. State dictionaries are still copied
+        # back to CPU at the FL boundary, so aggregation and saved artifacts keep
+        # the same portable representation on either device.
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.net = TimeSeriesCNN(features, cfg.hidden_channels).to(self.device)
 
     def clone_state(self) -> OrderedDict[str, torch.Tensor]:
@@ -96,7 +113,7 @@ class TorchModel:
 
     def evaluate_arrays(self, x: np.ndarray, y: np.ndarray) -> BinaryMetrics:
         probabilities = self.predict_probabilities(self.clone_state(), x)
-        return binary_metrics(y, probabilities)
+        return binary_metrics(y, probabilities, self.decision_threshold)
 
 
 def state_to_vector(state: OrderedDict[str, torch.Tensor]) -> np.ndarray:
@@ -105,6 +122,42 @@ def state_to_vector(state: OrderedDict[str, torch.Tensor]) -> np.ndarray:
         if torch.is_floating_point(tensor):
             values.append(tensor.detach().cpu().numpy().ravel().astype(np.float64))
     return np.concatenate(values) if values else np.empty((0,), dtype=np.float64)
+
+
+def state_commitment(state: OrderedDict[str, torch.Tensor], algorithm: str = "sha3_256") -> str:
+    """Bind the exact named tensors evaluated and aggregated by the simulator.
+
+    A lossy quantised vector cannot bind an FP32 evaluation: distinct tensors can
+    round to the same integers. Include names, shapes, dtypes and integer buffers
+    here; the independently compiled circuit has its own integer commitment.
+    """
+    payload = bytearray(b"XFedAgent:state:v1\x00")
+    for name, tensor in sorted(state.items()):
+        name_bytes = name.encode("utf-8")
+        value = array_payload(tensor.detach().cpu().contiguous().numpy())
+        for part in (name_bytes, value):
+            payload.extend(len(part).to_bytes(8, "big"))
+            payload.extend(part)
+    return digest_bytes(bytes(payload), algorithm)
+
+
+def aggregation_input_commitment(
+    round_index: int,
+    global_root: str,
+    entries: list[tuple[int, str, float]],
+    algorithm: str = "sha3_256",
+) -> str:
+    """Commit to the ordered models and actual weights consumed by the average."""
+    if len({client_id for client_id, _, _ in entries}) != len(entries):
+        raise ValueError("duplicate aggregation client")
+    payload = {
+        "domain": "XFedAgent:aggregation-input:v1",
+        "round": round_index,
+        "global_root": global_root,
+        # Preserve operation order: floating-point summation is not associative.
+        "inputs": [(cid, root, float(weight).hex()) for cid, root, weight in entries],
+    }
+    return digest_bytes(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(), algorithm)
 
 
 def vector_update(global_state: OrderedDict[str, torch.Tensor], client_state: OrderedDict[str, torch.Tensor]) -> np.ndarray:
@@ -133,11 +186,13 @@ def aggregate_states(
     client_states: list[OrderedDict[str, torch.Tensor]],
     weights: list[float],
 ) -> OrderedDict[str, torch.Tensor]:
+    if len(client_states) != len(weights):
+        raise ValueError("one aggregation weight is required per client state")
     if not client_states:
         return OrderedDict((name, tensor.detach().cpu().clone()) for name, tensor in global_state.items())
     total = float(np.sum(weights))
-    if total <= 0.0:
-        raise ValueError("aggregation weights must sum to a positive value")
+    if not np.isfinite(weights).all() or any(weight < 0.0 for weight in weights) or not np.isfinite(total) or total <= 0.0:
+        raise ValueError("aggregation weights must be finite, nonnegative and sum to a positive value")
     result: OrderedDict[str, torch.Tensor] = OrderedDict()
     for name, base_tensor in global_state.items():
         if torch.is_floating_point(base_tensor):
@@ -148,4 +203,3 @@ def aggregate_states(
         else:
             result[name] = base_tensor.detach().cpu().clone()
     return result
-

@@ -91,7 +91,7 @@ _PAPER_CELLS = [
 
 
 def test_factorial_reproduces_the_reported_effects():
-    e = factorial_effects(_PAPER_CELLS)
+    e = factorial_effects(_PAPER_CELLS, metric="accuracy_mean")
     assert round(e["main_effect_pov"] * 100, 1) == 21.1
     assert round(e["main_effect_reputation"] * 100, 1) == 13.3
     assert round(e["interaction"] * 100, 1) == -12.8
@@ -99,13 +99,13 @@ def test_factorial_reproduces_the_reported_effects():
 
 def test_interaction_is_negative_so_effects_are_not_additive():
     """Guards the claim the manuscript makes: the mechanisms are partially redundant."""
-    e = factorial_effects(_PAPER_CELLS)
+    e = factorial_effects(_PAPER_CELLS, metric="accuracy_mean")
     assert e["interaction"] < 0
     assert e["additive_prediction"] > e["observed_both"]
 
 
 def test_interaction_is_symmetric_in_the_two_factors():
-    e = factorial_effects(_PAPER_CELLS)
+    e = factorial_effects(_PAPER_CELLS, metric="accuracy_mean")
     pov_gain_from_rep = e["simple_effect_pov_with_reputation"] - e["simple_effect_pov_without_reputation"]
     rep_gain_from_pov = e["simple_effect_reputation_with_pov"] - e["simple_effect_reputation_without_pov"]
     assert abs(pov_gain_from_rep - rep_gain_from_pov) < 1e-9
@@ -114,9 +114,42 @@ def test_interaction_is_symmetric_in_the_two_factors():
 
 def test_factorial_requires_all_four_cells():
     with pytest.raises(ValueError, match="missing arm"):
-        factorial_effects(_PAPER_CELLS[:3])
+        factorial_effects(_PAPER_CELLS[:3], metric="accuracy_mean")
 
 
 def test_factorial_rejects_an_absent_metric():
     with pytest.raises(ValueError, match="absent from arm"):
         factorial_effects(_PAPER_CELLS, metric="auc_roc_mean")
+
+
+#: The same four cells as measured on the surrogate cohort, where a majority-class
+#: attack is nearly invisible to raw accuracy but not to the class-wise rates.
+_SURROGATE_CELLS = [
+    {"arm": "full", "accuracy_mean": 0.8886, "balanced_accuracy_mean": 0.8701},
+    {"arm": "no-rep", "accuracy_mean": 0.9022, "balanced_accuracy_mean": 0.8605},
+    {"arm": "no-pov", "accuracy_mean": 0.8994, "balanced_accuracy_mean": 0.6824},
+    {"arm": "no-pov+rep", "accuracy_mean": 0.8856, "balanced_accuracy_mean": 0.6091},
+]
+
+
+def test_the_outcome_metric_decides_whether_the_gate_has_an_effect():
+    """The choice of outcome is not cosmetic on a skewed cohort.
+
+    Measured on raw accuracy the gate appears to do nothing; measured on balanced
+    accuracy the same four runs give it a main effect of roughly twenty points.
+    This is the paper's own argument about ``P_acc`` applied to its own ablation,
+    so the metric has to be selected deliberately rather than inherited.
+    """
+    on_accuracy = factorial_effects(_SURROGATE_CELLS, metric="accuracy_mean")
+    on_balanced = factorial_effects(_SURROGATE_CELLS, metric="balanced_accuracy_mean")
+    assert abs(on_accuracy["main_effect_pov"] * 100) < 1.0
+    assert on_balanced["main_effect_pov"] * 100 > 20.0
+    # Both agree on the sign of the interaction: the mechanisms overlap.
+    assert on_accuracy["interaction"] < 0 and on_balanced["interaction"] < 0
+
+
+def test_the_reported_metric_is_carried_in_the_result():
+    """A factorial without its outcome named cannot be checked against a table."""
+    assert factorial_effects(_SURROGATE_CELLS)["metric"] == "balanced_accuracy_mean"
+    e = factorial_effects(_SURROGATE_CELLS, metric="balanced_accuracy_mean")
+    assert e["metric"] == "balanced_accuracy_mean"

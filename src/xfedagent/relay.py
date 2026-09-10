@@ -31,6 +31,8 @@ class CrossChainRelaySimulator:
         self.cfg = cfg
         self.nonces: dict[int, int] = {}
         self.seen: set[str] = set()
+        self.last_round: dict[int, int] = {}
+        self.replays_detected = 0
 
     def relay(self, transcript: ProofTranscript) -> RelayReceipt:
         if not self.cfg.enabled:
@@ -50,6 +52,11 @@ class CrossChainRelaySimulator:
             )
         source = self.cfg.chains[0]
         destination = self.cfg.chains[-1]
+        # Check the immutable source identity before assigning a new transport
+        # nonce; hashing a freshly minted nonce can never detect source replay.
+        if transcript.round_index <= self.last_round.get(transcript.client_id, -1):
+            self.replays_detected += 1
+            raise ValueError("relay replay or stale source round detected")
         nonce = self.nonces.get(transcript.client_id, 0)
         payload = f"{source}:{destination}:{transcript.client_id}:{transcript.round_index}:{nonce}:{transcript.proof_hash}".encode("utf-8")
         message_hash = digest_bytes(payload)
@@ -57,6 +64,7 @@ class CrossChainRelaySimulator:
             raise ValueError("relay replay detected")
         self.seen.add(message_hash)
         self.nonces[transcript.client_id] = nonce + 1
+        self.last_round[transcript.client_id] = transcript.round_index
         quorum = (2 * self.cfg.relayers) // 3 + 1
         source_finality = self.cfg.source_finality_blocks * self.cfg.source_block_seconds
         destination_finality = self.cfg.destination_finality_seconds
@@ -76,4 +84,3 @@ class CrossChainRelaySimulator:
             message_hash=message_hash,
             accepted=transcript.accepted,
         )
-

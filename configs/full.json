@@ -2,7 +2,7 @@
   "name": "full-mimic-cloud",
   "data": {
     "source": "csv_timeseries",
-    "samples": 26424,
+    "samples": 27344,
     "clients": 10,
     "timesteps": 24,
     "features": 17,
@@ -13,7 +13,7 @@
     "csv_path": "data/processed/mimic_mortality_24h.csv",
     "label_column": "mortality_48h",
     "patient_column": "subject_id",
-    "positive_rate": 0.137
+    "positive_rate": 0.1397
   },
   "model": {
     "kind": "cnn1d",
@@ -41,8 +41,8 @@
     "circuit_wasm": null,
     "proving_key": null,
     "predicate": "class_aware",
-    "threshold_sensitivity": 0.7,
-    "threshold_specificity": 0.7,
+    "threshold_sensitivity": 0.65,
+    "threshold_specificity": 0.65,
     "balanced_validation": true
   },
   "federation": {

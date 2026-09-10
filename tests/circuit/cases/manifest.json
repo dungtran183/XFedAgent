@@ -1,0 +1,52 @@
+[
+  {
+    "id": "T0",
+    "expected": "pass",
+    "scenario": "honest witness, all four conditions hold"
+  },
+  {
+    "id": "T1",
+    "expected": "fail",
+    "scenario": "counts do not sum to n"
+  },
+  {
+    "id": "T2",
+    "expected": "fail",
+    "scenario": "sensitivity one sample below threshold"
+  },
+  {
+    "id": "T3",
+    "expected": "pass",
+    "scenario": "sensitivity exactly at threshold (inclusive bound)"
+  },
+  {
+    "id": "T4",
+    "expected": "fail",
+    "scenario": "specificity one sample below threshold"
+  },
+  {
+    "id": "T5",
+    "expected": "pass",
+    "scenario": "specificity exactly at threshold (inclusive bound)"
+  },
+  {
+    "id": "T6",
+    "expected": "fail",
+    "scenario": "replay: theta_hat equals theta^(t)"
+  },
+  {
+    "id": "T7",
+    "expected": "fail",
+    "scenario": "H_glob taken from a stale round"
+  },
+  {
+    "id": "T8",
+    "expected": "fail",
+    "scenario": "C_D edited after the proof was formed"
+  },
+  {
+    "id": "T8b",
+    "expected": "fail",
+    "scenario": "H_theta edited after the proof was formed"
+  }
+]

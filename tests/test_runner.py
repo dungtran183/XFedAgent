@@ -1,4 +1,10 @@
 import json
+from collections import OrderedDict
+from dataclasses import replace
+
+import numpy as np
+import pytest
+import torch
 
 from xfedagent.runner import ExperimentRunner
 
@@ -53,3 +59,75 @@ def test_save_round_models_flag(tmp_path, synthetic_config) -> None:
     run_dir = tmp_path / summary["run_name"]
     saved = sorted((run_dir / "models").glob("round_*.pt"))
     assert len(saved) == cfg.federation.rounds
+
+
+def _admission_case(cfg):
+    from xfedagent.commitments import array_payload, digest_bytes
+    from xfedagent.metrics import binary_metrics
+    from xfedagent.pov import SoftwarePoVBackend, ValidationChallenge
+
+    x = np.arange(cfg.pov.validation_size, dtype=np.float32)[:, None, None]
+    y = np.arange(cfg.pov.validation_size) % 2
+    probabilities = y * 0.8 + 0.1
+
+    class FixedModel:
+        def evaluate_state(self, state, features, labels):
+            return binary_metrics(labels, probabilities)
+
+        def predict_probabilities(self, state, features):
+            return probabilities
+
+    challenge = ValidationChallenge(0, np.arange(y.size), "test-seed",
+        digest_bytes(array_payload(x) + array_payload(y), cfg.pov.hash_algorithm))
+    backend = SoftwarePoVBackend(cfg.pov, cfg.model)
+    args = dict(client_id=1, round_index=0, model=FixedModel(),
+        global_state=OrderedDict(weight=torch.tensor([0.0, 0.0])),
+        client_state=OrderedDict(weight=torch.tensor([1.0, 2.0])),
+        challenge=challenge, validation_x=x, validation_y=y)
+    return backend, args
+
+
+def test_pov_rejects_substituted_model_challenge_data_and_round(synthetic_config):
+    from xfedagent.model import state_commitment
+
+    backend, args = _admission_case(synthetic_config)
+    committed = state_commitment(args["client_state"])
+    assert backend.prove(**args, committed_model_root=committed)[0].accepted
+    with pytest.raises(ValueError, match="changed after commitment"):
+        backend.prove(**{**args, "client_state": OrderedDict(weight=torch.tensor([1.00001, 2.0]))}, committed_model_root=committed)
+    with pytest.raises(ValueError, match="does not open"):
+        backend.prove(**{**args, "validation_y": 1 - args["validation_y"]})
+    with pytest.raises(ValueError, match="round"):
+        backend.prove(**{**args, "round_index": 1})
+
+
+def test_pov_transcript_binds_predicate_policy_and_unambiguous_identity(synthetic_config):
+    from xfedagent.pov import SoftwarePoVBackend
+
+    backend, args = _admission_case(synthetic_config)
+    original, _ = backend.prove(**args)
+    modified = SoftwarePoVBackend(replace(synthetic_config.pov, threshold_sensitivity=0.61), synthetic_config.model)
+    assert modified.prove(**args)[0].proof_hash != original.proof_hash
+    # Decimal concatenation formerly aliased client=1, round=23 with 12, 3.
+    a = backend.prove(**{**args, "client_id": 1, "round_index": 23,
+        "challenge": replace(args["challenge"], round_index=23)})[0]
+    b = backend.prove(**{**args, "client_id": 12, "round_index": 3,
+        "challenge": replace(args["challenge"], round_index=3)})[0]
+    assert a.proof_hash != b.proof_hash
+
+
+def test_relay_rejects_duplicate_equivocating_and_stale_source_rounds(synthetic_config):
+    from xfedagent.relay import CrossChainRelaySimulator
+
+    backend, args = _admission_case(synthetic_config)
+    transcript, _ = backend.prove(**args)
+    relay = CrossChainRelaySimulator(synthetic_config.relay)
+    assert relay.relay(transcript).nonce == 0
+    for duplicated in (transcript, replace(transcript, proof_hash="different-proof")):
+        with pytest.raises(ValueError, match="replay"):
+            relay.relay(duplicated)
+    assert relay.relay(replace(transcript, round_index=2)).nonce == 1
+    with pytest.raises(ValueError, match="stale"):
+        relay.relay(replace(transcript, round_index=1))
+    assert relay.replays_detected == 3
+    assert relay.nonces[1] == 2, "refused replays must not consume fresh nonces"

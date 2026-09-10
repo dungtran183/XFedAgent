@@ -1,26 +1,28 @@
-"""Software Proof-of-Validation backend.
+"""Software admission evaluator with commitments to the exact evaluated tensors.
 
-The model weights and the validation subset are each bound to a single
-commitment over the whole quantised vector, matching the in-circuit
-construction (one streaming hash, no Merkle indirection or selective opening).
-This software backend uses SHA3-256 as a stand-in for the Poseidon-2 sponge
-that the Circom circuit uses; both are collision-resistant 256-bit commitments,
-and the substitution keeps the simulation free of a native field-arithmetic
-dependency without changing the commitment's binding semantics.
+The transcript is an integrity record, not a zero-knowledge proof. The separate
+Circom artifact evaluates an integer binary-linear model and uses Poseidon.
 """
 from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import asdict, dataclass
 import time
+import json
 
 import numpy as np
 import torch
 
-from .commitments import array_payload, digest_bytes, quantize_vector
-from .config import AblationConfig, ModelConfig, PoVConfig
-from .metrics import BinaryMetrics, confusion_counts, passes_class_aware, passes_raw_accuracy
-from .model import TorchModel, state_to_vector
+from .commitments import array_payload, digest_bytes
+from .config import AblationConfig, ModelConfig, PoVConfig, predicted_positive_rate_for
+from .metrics import (
+    BinaryMetrics,
+    confusion_counts,
+    confusion_counts_at_rate,
+    passes_class_aware,
+    passes_raw_accuracy,
+)
+from .model import TorchModel, state_commitment, state_to_vector
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,9 @@ class ProofTranscript:
     backend: str
     proof_seconds: float
     modeled_proof_seconds: float
+    global_root: str
+    confusion: dict[str, int]
+    policy: dict
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -114,12 +119,22 @@ class SoftwarePoVBackend:
         cfg: PoVConfig,
         model_cfg: ModelConfig,
         ablation: AblationConfig | None = None,
+        predicted_positive_rate: float | None = None,
     ) -> None:
         if cfg.backend != "software":
             raise ValueError("SoftwarePoVBackend requires backend=software")
         self.cfg = cfg
         self.model_cfg = model_cfg
         self.ablation = ablation or AblationConfig()
+        # Under decision_rule="rate" the rate is a public challenge parameter, so it
+        # is resolved once here rather than per proof. The closed form reads the
+        # challenge prevalence, which for an unbalanced challenge comes from the
+        # cohort; the balanced form is the fallback when the caller supplies none.
+        self.predicted_positive_rate = (
+            float(predicted_positive_rate)
+            if predicted_positive_rate is not None
+            else predicted_positive_rate_for(cfg, 0.5 if cfg.balanced_validation else 0.5)
+        )
 
     def prove(
         self,
@@ -131,20 +146,50 @@ class SoftwarePoVBackend:
         challenge: ValidationChallenge,
         validation_x: np.ndarray,
         validation_y: np.ndarray,
+        committed_model_root: str | None = None,
     ) -> tuple[ProofTranscript, BinaryMetrics]:
         start = time.perf_counter()
+        if round_index != challenge.round_index:
+            raise ValueError("proof round does not match validation challenge")
+        if len(validation_y) != self.cfg.validation_size or len(validation_x) != len(validation_y):
+            raise ValueError("validation challenge has an unexpected sample count")
+        actual_validation_root = digest_bytes(
+            array_payload(validation_x) + array_payload(validation_y), self.cfg.hash_algorithm
+        )
+        if actual_validation_root != challenge.validation_root:
+            raise ValueError("validation data does not open the challenge commitment")
+        model_root = state_commitment(client_state, self.cfg.hash_algorithm)
+        if committed_model_root is not None and model_root != committed_model_root:
+            raise ValueError("client model changed after commitment")
+        global_root = state_commitment(global_state, self.cfg.hash_algorithm)
         metrics = model.evaluate_state(client_state, validation_x, validation_y)
         probabilities = model.predict_probabilities(client_state, validation_x)
-        counts = confusion_counts(validation_y, probabilities)
+        # The software evaluator's four counts. Under the rate rule no threshold need
+        # exist -- equal scores straddling the k-th place leave no threshold that
+        # declares exactly k rows positive -- and that is a refusal rather than a
+        # fallback. Threshold-rule counts are recorded either way, so a rejected
+        # submission still carries a comparable operating point.
+        witness_exists = True
+        if self.cfg.decision_rule == "rate":
+            rate_counts = confusion_counts_at_rate(
+                validation_y, probabilities, self.predicted_positive_rate
+            )
+            witness_exists = rate_counts is not None
+        else:
+            rate_counts = None
+        counts = (
+            rate_counts
+            if rate_counts is not None
+            else confusion_counts(validation_y, probabilities, self.cfg.decision_threshold)
+        )
         vector = state_to_vector(client_state)
-        quantized, scale = quantize_vector(vector, self.model_cfg.quantization_bits)
-        model_payload = array_payload(quantized) + np.asarray([scale], dtype=np.float64).tobytes()
-        model_root = digest_bytes(model_payload, self.cfg.hash_algorithm)
         copy_distance = float(np.linalg.norm(vector - state_to_vector(global_state)))
         # Ablations: without the PoV utility gate every update is admitted; without
         # the in-circuit copy detector a replayed global model is no longer rejected.
         if not self.ablation.pov_enabled:
             meets_threshold = True
+        elif not witness_exists:
+            meets_threshold = False
         elif self.cfg.predicate == "class_aware":
             meets_threshold = passes_class_aware(
                 counts,
@@ -161,14 +206,31 @@ class SoftwarePoVBackend:
             if self.ablation.copy_detector_enabled
             else True
         )
-        accepted = bool(meets_threshold and not_a_copy)
-        transcript_payload = (
-            str(client_id).encode("ascii")
-            + str(round_index).encode("ascii")
-            + bytes.fromhex(model_root)
-            + bytes.fromhex(challenge.validation_root)
-            + f"{metrics.accuracy:.12f}:{self.cfg.threshold:.12f}:{copy_distance:.12f}".encode("ascii")
-        )
+        accepted = bool(meets_threshold and not_a_copy and np.isfinite(vector).all() and np.isfinite(probabilities).all())
+        policy = {
+            "predicate": self.cfg.predicate,
+            "threshold": self.cfg.threshold,
+            "threshold_sensitivity": self.cfg.threshold_sensitivity,
+            "threshold_specificity": self.cfg.threshold_specificity,
+            "tolerance": self.cfg.tolerance,
+            "decision_rule": self.cfg.decision_rule,
+            "decision_threshold": self.cfg.decision_threshold,
+            "predicted_positive_rate": self.predicted_positive_rate,
+            "copy_epsilon": self.model_cfg.copy_epsilon,
+            "pov_enabled": self.ablation.pov_enabled,
+            "copy_detector_enabled": self.ablation.copy_detector_enabled,
+        }
+        transcript_payload = json.dumps({
+            "domain": "XFedAgent:software-pov:v1",
+            "client_id": client_id,
+            "round_index": round_index,
+            "model_root": model_root,
+            "global_root": global_root,
+            "validation_root": challenge.validation_root,
+            "counts": counts.to_dict(),
+            "policy": policy,
+            "accepted": accepted,
+        }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
         proof_hash = digest_bytes(transcript_payload, self.cfg.hash_algorithm)
         proof_seconds = time.perf_counter() - start
         modeled = self.cfg.proof_seconds_per_sample * self.cfg.validation_size
@@ -178,7 +240,7 @@ class SoftwarePoVBackend:
             model_root=model_root,
             validation_root=challenge.validation_root,
             proof_hash=proof_hash,
-            accuracy=metrics.accuracy,
+            accuracy=counts.accuracy,
             threshold=self.cfg.threshold,
             copy_distance=copy_distance,
             sensitivity=counts.sensitivity,
@@ -189,5 +251,8 @@ class SoftwarePoVBackend:
             backend=self.cfg.backend,
             proof_seconds=proof_seconds,
             modeled_proof_seconds=modeled,
+            global_root=global_root,
+            confusion=counts.to_dict(),
+            policy=policy,
         )
         return transcript, metrics

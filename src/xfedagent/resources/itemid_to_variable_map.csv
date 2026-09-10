@@ -1,0 +1,115 @@
+variable,itemid,mimic_label,linksto
+Capillary refill rate,115,Capillary Refill [Right],chartevents
+Capillary refill rate,3348,Capillary Refill,chartevents
+Capillary refill rate,8377,Capillary Refill [Left],chartevents
+Diastolic blood pressure,8368,Arterial BP [Diastolic],chartevents
+Diastolic blood pressure,8440,Manual BP [Diastolic],chartevents
+Diastolic blood pressure,8441,NBP [Diastolic],chartevents
+Diastolic blood pressure,8502,BP Cuff [Diastolic],chartevents
+Diastolic blood pressure,8503,BP Left Arm [Diastolic],chartevents
+Diastolic blood pressure,8504,BP Left Leg [Diastolic],chartevents
+Diastolic blood pressure,8506,BP Right Arm [Diastolic],chartevents
+Diastolic blood pressure,8507,BP Right Leg [Diastolic],chartevents
+Diastolic blood pressure,8555,Arterial BP #2 [Diastolic],chartevents
+Diastolic blood pressure,220051,Arterial Blood Pressure diastolic,chartevents
+Diastolic blood pressure,220180,Non Invasive Blood Pressure diastolic,chartevents
+Diastolic blood pressure,224643,Manual Blood Pressure Diastolic Left,chartevents
+Diastolic blood pressure,225310,ART BP Diastolic,chartevents
+Fraction inspired oxygen,189,FiO2 (Analyzed),chartevents
+Fraction inspired oxygen,727,Vision FiO2,chartevents
+Fraction inspired oxygen,3420,FIO2,chartevents
+Fraction inspired oxygen,3422,FIO2 [Meas],chartevents
+Fraction inspired oxygen,223835,Inspired O2 Fraction,chartevents
+Glascow coma scale eye opening,184,Eye Opening,chartevents
+Glascow coma scale eye opening,220739,GCS - Eye Opening,chartevents
+Glascow coma scale motor response,454,Motor Response,chartevents
+Glascow coma scale motor response,223901,GCS - Motor Response,chartevents
+Glascow coma scale total,198,GCS Total,chartevents
+Glascow coma scale verbal response,723,Verbal Response,chartevents
+Glascow coma scale verbal response,223900,GCS - Verbal Response,chartevents
+Glucose,807,Fingerstick Glucose,chartevents
+Glucose,811,Glucose (70-105),chartevents
+Glucose,1529,Glucose,chartevents
+Glucose,3745,BloodGlucose,chartevents
+Glucose,50809,GLUCOSE,labevents
+Glucose,50931,GLUCOSE,labevents
+Glucose,51478,GLUCOSE,labevents
+Glucose,220621,Glucose (serum),chartevents
+Glucose,225664,Glucose finger stick,chartevents
+Glucose,226537,Glucose (whole blood),chartevents
+Heart Rate,211,Heart Rate,chartevents
+Heart Rate,220045,Heart Rate,chartevents
+Height,1394,Height Inches,chartevents
+Height,226707,Height,chartevents
+Height,226730,Height (cm),chartevents
+Mean blood pressure,52,Arterial BP Mean,chartevents
+Mean blood pressure,224,IABP Mean,chartevents
+Mean blood pressure,456,NBP Mean,chartevents
+Mean blood pressure,3312,BP Cuff [Mean],chartevents
+Mean blood pressure,3314,BP Left Arm [Mean],chartevents
+Mean blood pressure,3316,BP Left Leg [Mean],chartevents
+Mean blood pressure,3320,BP Right Arm [Mean],chartevents
+Mean blood pressure,3322,BP Right Leg [Mean],chartevents
+Mean blood pressure,6702,Arterial BP Mean #2,chartevents
+Mean blood pressure,220052,Arterial Blood Pressure mean,chartevents
+Mean blood pressure,220181,Non Invasive Blood Pressure mean,chartevents
+Mean blood pressure,224322,IABP Mean,chartevents
+Mean blood pressure,225312,ART BP mean,chartevents
+Oxygen saturation,646,SpO2,chartevents
+Oxygen saturation,834,SaO2,chartevents
+Oxygen saturation,8498,O2 sat [Post],chartevents
+Oxygen saturation,50817,OXYGEN SATURATION,labevents
+Oxygen saturation,220227,Arterial O2 Saturation,chartevents
+Oxygen saturation,220277,O2 saturation pulseoxymetry,chartevents
+Respiratory rate,614,Resp Rate (Spont),chartevents
+Respiratory rate,615,Resp Rate (Total),chartevents
+Respiratory rate,618,Respiratory Rate,chartevents
+Respiratory rate,651,Spon RR (Mech.),chartevents
+Respiratory rate,3603,Resp Rate,chartevents
+Respiratory rate,220210,Respiratory Rate,chartevents
+Respiratory rate,224422,Spont RR,chartevents
+Respiratory rate,224689,Respiratory Rate (spontaneous),chartevents
+Respiratory rate,224690,Respiratory Rate (Total),chartevents
+Systolic blood pressure,51,Arterial BP [Systolic],chartevents
+Systolic blood pressure,442,Manual BP [Systolic],chartevents
+Systolic blood pressure,455,NBP [Systolic],chartevents
+Systolic blood pressure,3313,BP Cuff [Systolic],chartevents
+Systolic blood pressure,3315,BP Left Arm [Systolic],chartevents
+Systolic blood pressure,3317,BP Left Leg [Systolic],chartevents
+Systolic blood pressure,3321,BP Right Arm [Systolic],chartevents
+Systolic blood pressure,3323,BP Right Leg [Systolic],chartevents
+Systolic blood pressure,6701,Arterial BP #2 [Systolic],chartevents
+Systolic blood pressure,220050,Arterial Blood Pressure systolic,chartevents
+Systolic blood pressure,220179,Non Invasive Blood Pressure systolic,chartevents
+Systolic blood pressure,224167,Manual Blood Pressure Systolic Left,chartevents
+Systolic blood pressure,225309,ART BP Systolic,chartevents
+Systolic blood pressure,227243,Manual Blood Pressure Systolic Right,chartevents
+Temperature,676,Temperature C,chartevents
+Temperature,677,Temperature C (calc),chartevents
+Temperature,678,Temperature F,chartevents
+Temperature,679,Temperature F (calc),chartevents
+Temperature,3654,Temp Rectal [F],chartevents
+Temperature,3655,Temp Skin [C],chartevents
+Temperature,223761,Temperature Fahrenheit,chartevents
+Temperature,223762,Temperature Celsius,chartevents
+Weight,763,Daily Weight,chartevents
+Weight,3580,Present Weight  (kg),chartevents
+Weight,3581,Present Weight  (lb),chartevents
+Weight,3582,Present Weight  (oz),chartevents
+Weight,3693,Weight Kg,chartevents
+Weight,224639,Daily Weight,chartevents
+Weight,226512,Admission Weight (Kg),chartevents
+Weight,226531,Admission Weight (lbs.),chartevents
+pH,780,Arterial pH,chartevents
+pH,860,Venous pH,chartevents
+pH,1126,Art.pH,chartevents
+pH,1673,PH,chartevents
+pH,3839,ph (other),chartevents
+pH,4202,pH (cap),chartevents
+pH,4753,pH (Art),chartevents
+pH,50820,PH,labevents
+pH,50831,PH,labevents
+pH,51094,PH,labevents
+pH,51491,PH,labevents
+pH,220274,PH (Venous),chartevents
+pH,223830,PH (Arterial),chartevents

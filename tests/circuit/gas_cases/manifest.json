@@ -1,0 +1,17 @@
+[
+  {
+    "id": "G1",
+    "expected": "pass",
+    "scenario": "perfect classifier: every public count at its maximum"
+  },
+  {
+    "id": "G2",
+    "expected": "pass",
+    "scenario": "sensitivity just above threshold, high specificity"
+  },
+  {
+    "id": "G3",
+    "expected": "pass",
+    "scenario": "specificity just above threshold, high sensitivity"
+  }
+]

@@ -8,13 +8,13 @@ import numpy as np
 import torch
 
 from .attacks import apply_update_attacks, poison_inputs, poison_labels
-from .commitments import MerkleCommitter, array_payload, digest_bytes, stable_config_digest
-from .config import ExperimentConfig
+from .commitments import MerkleCommitter, array_payload, stable_config_digest
+from .config import ExperimentConfig, resolved_predicted_positive_rate
 from .data import load_dataset
 from .energy import estimate_energy
 from .metrics import predicate_margin
 from .metrics import summarize
-from .model import TorchModel, aggregate_states, state_to_vector
+from .model import TorchModel, aggregate_states, aggregation_input_commitment, state_commitment, state_to_vector
 from .pov import SoftwarePoVBackend, ValidationRotator
 from .relay import CrossChainRelaySimulator
 from .results import prepare_run_dir, save_round_model, write_json, write_rounds_csv
@@ -29,9 +29,20 @@ class ExperimentRunner:
     def run(self) -> dict:
         self._seed_everything(self.cfg.federation.seed)
         data = load_dataset(self.cfg.data, self.cfg.federation.seed)
-        model = TorchModel(self.cfg.model, self.cfg.data.features, self.cfg.data.timesteps, self.cfg.federation.seed)
+        model = TorchModel(
+            self.cfg.model,
+            self.cfg.data.features,
+            self.cfg.data.timesteps,
+            self.cfg.federation.seed,
+            self.cfg.pov.decision_threshold,
+        )
         ablation = self.cfg.ablation
-        pov = SoftwarePoVBackend(self.cfg.pov, self.cfg.model, ablation)
+        pov = SoftwarePoVBackend(
+            self.cfg.pov,
+            self.cfg.model,
+            ablation,
+            predicted_positive_rate=resolved_predicted_positive_rate(self.cfg),
+        )
         rotator = ValidationRotator(
             self.cfg.pov, data.validation_pool_x, data.validation_pool_y, ablation
         )
@@ -58,8 +69,6 @@ class ExperimentRunner:
 
         for round_index in range(self.cfg.federation.rounds):
             selected = self._select_round_clients(round_index, rng)
-            challenge = rotator.challenge(round_index, self.cfg.federation.seed)
-            val_x, val_y = rotator.data_for(challenge)
             trained_states: dict[int, OrderedDict[str, torch.Tensor]] = {}
             training_seconds: dict[int, float] = {}
 
@@ -74,9 +83,17 @@ class ExperimentRunner:
                 training_seconds[client_id] = train.seconds
 
             trained_states = apply_update_attacks(global_state, trained_states, malicious, self.cfg.federation.attacks, rng)
+            # Freeze the submitted tensors before revealing the round challenge.
+            committed_models = {
+                cid: state_commitment(state, self.cfg.pov.hash_algorithm)
+                for cid, state in trained_states.items()
+            }
+            previous_model_root = state_commitment(global_state, self.cfg.pov.hash_algorithm)
+            challenge = rotator.challenge(round_index, self.cfg.federation.seed)
+            val_x, val_y = rotator.data_for(challenge)
             accepted_states: list[OrderedDict[str, torch.Tensor]] = []
             weights: list[float] = []
-            accepted_clients: list[int] = []
+            accepted_inputs: list[tuple[int, str, float]] = []
             round_accepted = 0
             round_rejected = 0
             round_honest_attempts = 0
@@ -94,6 +111,7 @@ class ExperimentRunner:
                     challenge=challenge,
                     validation_x=val_x,
                     validation_y=val_y,
+                    committed_model_root=committed_models[client_id],
                 )
                 receipt = relay.relay(transcript)
                 relay_quorum = receipt.quorum
@@ -108,7 +126,7 @@ class ExperimentRunner:
                     round_mal_admitted += 1
                 if not transcript.accepted and not is_malicious:
                     round_honest_rejects += 1
-                if transcript.accepted:
+                if receipt.accepted:
                     if ablation.reputation_enabled:
                         margin = predicate_margin(
                             self.cfg.pov.predicate,
@@ -132,9 +150,11 @@ class ExperimentRunner:
                         admitted = True
                         weight = 1.0
                     if admitted:
+                        if state_commitment(trained_states[client_id], self.cfg.pov.hash_algorithm) != transcript.model_root:
+                            raise ValueError("aggregation model does not match admitted commitment")
                         accepted_states.append(trained_states[client_id])
                         weights.append(weight)
-                        accepted_clients.append(client_id)
+                        accepted_inputs.append((client_id, transcript.model_root, weight))
                         accepted_updates += 1
                         round_accepted += 1
                 else:
@@ -165,11 +185,8 @@ class ExperimentRunner:
 
             global_state = aggregate_states(global_state, accepted_states, weights)
             global_model_root = committer.build(array_payload(state_to_vector(global_state))).root
-            input_binding_hash = digest_bytes(
-                "|".join(
-                    f"{cid}:{reputations[cid]:.12f}" for cid in sorted(accepted_clients)
-                ).encode("utf-8"),
-                self.cfg.pov.hash_algorithm,
+            input_binding_hash = aggregation_input_commitment(
+                round_index, previous_model_root, accepted_inputs, self.cfg.pov.hash_algorithm
             )
             test_metrics = model.evaluate_state(global_state, data.test_x, data.test_y)
             if self.cfg.output.save_round_models:
@@ -190,6 +207,12 @@ class ExperimentRunner:
                     ),
                     "mean_reputation": float(np.mean(list(reputations.values()))),
                     "active_reputations": int(sum(v >= self.cfg.federation.reputation_min for v in reputations.values())),
+                    # Per-round denominators, so a submission-weighted p_det can be
+                    # recomputed from rounds.csv without rerunning the experiment.
+                    "malicious_submitted": round_mal_attempts,
+                    "malicious_admitted": round_mal_admitted,
+                    "honest_submitted": round_honest_attempts,
+                    "honest_rejected": round_honest_rejects,
                     "global_model_root": global_model_root,
                     "input_binding_hash": input_binding_hash,
                 }
@@ -199,6 +222,7 @@ class ExperimentRunner:
         final_model_root = committer.build(array_payload(state_to_vector(global_state))).root
         summary = {
             "run_name": self.run_name,
+            "execution_device": str(model.device),
             "config_digest": self.config_digest,
             "ablation": {**self.cfg.ablation.__dict__, "label": self.cfg.ablation.label},
             "final_metrics": final_metrics.to_dict(),
@@ -206,6 +230,14 @@ class ExperimentRunner:
             "accepted_updates": accepted_updates,
             "rejected_updates": rejected_updates,
             "malicious_clients": sorted(malicious),
+            # Raw submission counts, not just the ratios: p_det is estimated over
+            # total submissions rather than as a mean of per-round rates, and a
+            # Wilson interval needs the denominator.
+            "malicious_submitted": malicious_attempts,
+            "malicious_admitted": malicious_attempts - malicious_rejections,
+            "malicious_rejected": malicious_rejections,
+            "honest_submitted": honest_attempts,
+            "honest_rejected": honest_false_rejects,
             "malicious_rejection_rate": malicious_rejections / malicious_attempts if malicious_attempts else 0.0,
             "honest_false_reject_rate": honest_false_rejects / honest_attempts if honest_attempts else 0.0,
             "proof_seconds": summarize(proof_seconds),
@@ -220,7 +252,7 @@ class ExperimentRunner:
                 "total_gas": int(sum(relay_gas)),
                 "gas_per_update": summarize([float(g) for g in relay_gas]),
                 "messages_relayed": len(relay_gas),
-                "replays_detected": 0,
+                "replays_detected": relay.replays_detected,
             },
             "final_reputations": {str(k): v for k, v in sorted(reputations.items())},
         }

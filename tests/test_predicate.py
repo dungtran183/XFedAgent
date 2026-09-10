@@ -9,6 +9,7 @@ import pytest
 
 from xfedagent.metrics import (
     ConfusionCounts,
+    binary_metrics,
     confusion_counts,
     passes_class_aware,
     passes_raw_accuracy,
@@ -78,7 +79,8 @@ def test_confusion_counts_partition_the_sample():
 # --------------------------------------------------------------------------
 # Balanced validation sampling
 # --------------------------------------------------------------------------
-import json, pathlib  # noqa: E402
+import json  # noqa: E402
+import pathlib  # noqa: E402
 from xfedagent.config import parse_config  # noqa: E402
 from xfedagent.pov import ValidationRotator  # noqa: E402
 
@@ -178,3 +180,83 @@ def test_exclusion_threshold_from_max_margin():
     for predicate, expected in (("raw_accuracy", 0.048), ("class_aware", 0.057)):
         d = max_predicate_margin(predicate, 0.75, 0.70, 0.70)
         assert alpha * d / (beta + alpha * d) == pytest.approx(expected, abs=5e-4)
+
+
+def test_a_diverged_update_is_scored_rather_than_crashing():
+    """Non-finite model outputs must reach the gate as a verdict, not an exception.
+
+    A norm-matched random update is admitted often enough that the global model
+    can diverge; once the logits overflow, the softmax returns ``nan``. The
+    measurement has to survive that and score the submission, because a run that
+    aborts yields no detection rate at all.
+    """
+    y_true = np.array([0, 1, 0, 1])
+    diverged = np.array([np.nan, np.nan, np.nan, np.nan])
+    metrics = binary_metrics(y_true, diverged)
+    assert metrics.samples == 4
+    # Scored as a constant negative prediction: nothing positive is recovered.
+    assert metrics.recall == 0.0
+    assert metrics.specificity == 1.0
+    assert metrics.auc_roc == pytest.approx(0.5)
+
+
+def test_a_diverged_update_fails_the_class_aware_gate():
+    y_true = np.array([0, 1] * 25)
+    counts = confusion_counts(y_true, np.full(50, np.nan))
+    assert counts.tp == 0 and counts.fn == 25
+    assert not passes_class_aware(counts, 0.65, 0.65)
+
+
+def test_metrics_and_counts_agree_on_non_finite_output():
+    """The gate reads counts and the tables read metrics; they must not disagree."""
+    y_true = np.array([0, 1, 1, 0, 1])
+    probabilities = np.array([0.9, np.inf, np.nan, -np.inf, 0.8])
+    counts = confusion_counts(y_true, probabilities)
+    metrics = binary_metrics(y_true, probabilities)
+    assert counts.sensitivity == pytest.approx(metrics.recall)
+    assert counts.specificity == pytest.approx(metrics.specificity)
+
+
+# --------------------------------------------------------------------------
+# The decision threshold the counts are taken at
+# --------------------------------------------------------------------------
+
+
+def test_default_decision_threshold_is_the_historical_half():
+    """The field exists to be stated, not to change what earlier runs measured."""
+    rng = np.random.default_rng(7)
+    y = (rng.random(N) < PREVALENCE).astype(int)
+    p = rng.random(N)
+    assert confusion_counts(y, p) == confusion_counts(y, p, 0.5)
+    assert binary_metrics(y, p).to_dict() == binary_metrics(y, p, 0.5).to_dict()
+
+
+def test_a_low_prevalence_model_can_pass_only_at_a_placed_threshold():
+    """The measured failure: score mass below 0.5 makes the gate read Se = 0.
+
+    A model that separates the classes well can still be rejected by a gate that
+    binarises at 0.5, because on a cohort at 13.7% prevalence the positive scores
+    need not cross a half. The same counts, taken where the scores actually lie,
+    satisfy the same predicate.
+    """
+    y = np.array([1] * 20 + [0] * 80)
+    # Ranked correctly -- positives score above negatives -- but all below 0.5.
+    p = np.concatenate([np.linspace(0.24, 0.40, 20), np.linspace(0.02, 0.22, 80)])
+    at_half = confusion_counts(y, p, 0.5)
+    assert at_half.tp == 0 and at_half.sensitivity == 0.0
+    assert not passes_class_aware(at_half, 0.65, 0.65)
+    placed = confusion_counts(y, p, 0.23)
+    assert passes_class_aware(placed, 0.65, 0.65)
+    # Neither predicate nor counts changed shape: still a partition of the sample.
+    assert placed.tp + placed.tn + placed.fp + placed.fn == 100
+
+
+def test_config_rejects_a_decision_threshold_outside_the_unit_interval():
+    from xfedagent.config import validate_config
+
+    cfg = parse_config(json.loads((pathlib.Path("configs/full.json")).read_text()))
+    assert cfg.pov.decision_threshold == 0.5
+    for bad in (0.0, 1.0, -0.1, 1.5):
+        object.__setattr__(cfg.pov, "decision_threshold", bad)
+        with pytest.raises(ValueError, match="decision_threshold"):
+            validate_config(cfg)

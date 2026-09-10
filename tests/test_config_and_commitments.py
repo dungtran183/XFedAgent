@@ -1,6 +1,9 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
+import torch
+from collections import OrderedDict
 
 from xfedagent.commitments import MerkleCommitter, quantize_vector
 from xfedagent.config import load_config
@@ -53,3 +56,41 @@ def test_energy_disabled_is_zero() -> None:
     breakdown = estimate_energy(cfg, 10.0, 10.0, 10.0, 10.0)
     assert breakdown.total_wh == 0.0
 
+
+def test_exact_state_binding_distinguishes_models_with_the_same_quantization():
+    from xfedagent.model import state_commitment, state_to_vector
+
+    a = OrderedDict(weight=torch.tensor([1.0, 2.0]), counter=torch.tensor(1))
+    b = OrderedDict(weight=torch.tensor([1.00001, 2.0]), counter=torch.tensor(1))
+    qa, sa = quantize_vector(state_to_vector(a), 8)
+    qb, sb = quantize_vector(state_to_vector(b), 8)
+    assert np.array_equal(qa, qb) and sa == sb
+    assert state_commitment(a) != state_commitment(b)
+    b = OrderedDict(weight=a["weight"], counter=torch.tensor(2))
+    assert state_commitment(a) != state_commitment(b), "integer buffers also bind"
+
+
+def test_aggregation_binding_includes_models_round_order_and_actual_weights():
+    from xfedagent.model import aggregation_input_commitment
+
+    entries = [(1, "model-a", 0.5), (2, "model-b", 0.6)]
+    baseline = aggregation_input_commitment(2, "global-a", entries)
+    assert baseline == aggregation_input_commitment(2, "global-a", entries.copy())
+    variants = [
+        (3, "global-a", entries), (2, "global-b", entries),
+        (2, "global-a", list(reversed(entries))),
+        (2, "global-a", [(1, "changed-model", 0.5), entries[1]]),
+        (2, "global-a", [(1, "model-a", np.nextafter(0.5, 1.0)), entries[1]]),
+    ]
+    assert all(aggregation_input_commitment(*variant) != baseline for variant in variants)
+    with pytest.raises(ValueError, match="duplicate"):
+        aggregation_input_commitment(2, "g", [entries[0], entries[0]])
+
+
+@pytest.mark.parametrize("weights", [[float("nan")], [float("inf")], [-1.0], [0.0], []])
+def test_aggregation_rejects_invalid_weights(weights):
+    from xfedagent.model import aggregate_states
+
+    state = OrderedDict(weight=torch.tensor([1.0, 2.0]))
+    with pytest.raises(ValueError, match="weight"):
+        aggregate_states(state, [state], weights)

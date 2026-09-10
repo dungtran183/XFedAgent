@@ -55,6 +55,11 @@ METRIC_FIELDS: tuple[str, ...] = (
     "accuracy",
     "auc_roc",
     "f1",
+    # Sensitivity and specificity are what the class-aware predicate gates on, so
+    # both are aggregated per arm rather than summarised into accuracy alone.
+    "sensitivity",
+    "specificity",
+    "balanced_accuracy",
     "malicious_rejection_rate",
     "honest_false_reject_rate",
 )
@@ -142,8 +147,17 @@ def run_ablation(
                     "accuracy": metrics["accuracy"],
                     "auc_roc": metrics["auc_roc"],
                     "f1": metrics["f1"],
+                    # ``recall`` is sensitivity; it is renamed here so the results
+                    # tables use the clinical term the predicate is stated in.
+                    "sensitivity": metrics["recall"],
+                    "specificity": metrics["specificity"],
+                    "balanced_accuracy": metrics["balanced_accuracy"],
                     "malicious_rejection_rate": summary["malicious_rejection_rate"],
                     "honest_false_reject_rate": summary["honest_false_reject_rate"],
+                    "malicious_submitted": summary["malicious_submitted"],
+                    "malicious_admitted": summary["malicious_admitted"],
+                    "honest_submitted": summary["honest_submitted"],
+                    "honest_rejected": summary["honest_rejected"],
                     "accepted_updates": summary["accepted_updates"],
                     "rejected_updates": summary["rejected_updates"],
                     "run_name": summary["run_name"],
@@ -237,7 +251,9 @@ FACTORIAL_CELLS: dict[str, tuple[bool, bool]] = {
 }
 
 
-def factorial_effects(aggregate: list[dict], metric: str = "accuracy_mean") -> dict:
+def factorial_effects(
+    aggregate: list[dict], metric: str = "balanced_accuracy_mean"
+) -> dict:
     """Main effects and interaction for the PoV-gate x reputation design.
 
     A 2x2 design has four cells. Writing ``y[p][r]`` for the mean metric with the

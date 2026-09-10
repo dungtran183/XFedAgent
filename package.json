@@ -3,14 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "compile:linear-pov": "mkdir -p artifacts/circuits && circom circuits/binary_linear_pov.circom --r1cs --wasm --sym -o artifacts/circuits",
-    "compile:contracts": "hardhat compile"
+    "compile:linear-pov": "mkdir -p build && circom circuits/binary_linear_pov.circom --r1cs --wasm --sym -o build",
+    "compile:contracts": "hardhat compile",
+    "circuit:inputs": "node tests/circuit/gen_inputs.mjs",
+    "circuit:test": "bash scripts/run_circuit_tests.sh",
+    "circuit:gas": "hardhat run --network hardhat scripts/measure_gas.js"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
-    "circomlib": "^2.0.5",
-    "hardhat": "^3.0.17",
-    "snarkjs": "^0.7.5"
+    "@nomicfoundation/hardhat-toolbox": "6.1.2",
+    "circomlib": "2.0.5",
+    "circomlibjs": "0.1.7",
+    "hardhat": "2.28.6",
+    "snarkjs": "0.7.2"
   }
 }
-

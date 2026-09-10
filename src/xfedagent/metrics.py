@@ -14,26 +14,67 @@ class BinaryMetrics:
     recall: float
     f1: float
     samples: int
+    # Under a class-aware gate both sensitivity and specificity are quantities the
+    # protocol acts on, so both are reported. ``recall`` is sensitivity; the
+    # complementary rate is kept alongside it rather than left to be recomputed.
+    specificity: float = 0.0
+    balanced_accuracy: float = 0.0
 
     def to_dict(self) -> dict[str, float | int]:
         return asdict(self)
 
 
-def binary_metrics(y_true: np.ndarray, probabilities: np.ndarray) -> BinaryMetrics:
-    y_true = np.asarray(y_true).astype(int)
+
+def _scored_probabilities(probabilities: np.ndarray) -> np.ndarray:
+    """Model outputs as float64, with non-finite entries scored as no signal.
+
+    A norm-matched random update that the gate admits perturbs the global model
+    in an arbitrary direction; enough admitted rounds of it drive the logits to
+    ``inf`` and the softmax to ``nan``. Such a submission has no measurable
+    utility, so it is scored as a confident negative prediction instead of being
+    allowed to abort the measurement. The class-aware predicate then rejects it
+    for a zero sensitivity numerator, which is the verdict the gate should reach
+    anyway; doing the substitution here rather than special-casing the gate keeps
+    a single definition of the predicate, and keeps the confusion counts the
+    circuit is stated over consistent with the metrics reported beside them.
+    """
     probabilities = np.asarray(probabilities, dtype=np.float64)
-    y_pred = (probabilities >= 0.5).astype(int)
+    if probabilities.size and not np.isfinite(probabilities).all():
+        probabilities = np.nan_to_num(probabilities, nan=0.0, posinf=1.0, neginf=0.0)
+    return probabilities
+
+
+def binary_metrics(
+    y_true: np.ndarray, probabilities: np.ndarray, decision_threshold: float = 0.5
+) -> BinaryMetrics:
+    """Metrics at a stated decision threshold; 0.5 unless a config names another.
+
+    The threshold is a parameter rather than a literal because on a cohort whose
+    prevalence is far from a half the model's score mass sits well below 0.5, so
+    ``0.5`` measures sensitivity at an operating point the model was never fitted
+    for. It defaults to 0.5, which is what every earlier run used.
+    """
+
+    y_true = np.asarray(y_true).astype(int)
+    probabilities = _scored_probabilities(probabilities)
+    y_pred = (probabilities >= decision_threshold).astype(int)
     if np.unique(y_true).size == 1:
         auc = 0.5
     else:
         auc = float(roc_auc_score(y_true, probabilities))
+    negatives = int(np.sum(y_true == 0))
+    true_negatives = int(np.sum((y_true == 0) & (y_pred == 0)))
+    specificity = float(true_negatives / negatives) if negatives else 0.0
+    sensitivity = float(recall_score(y_true, y_pred, zero_division=0))
     return BinaryMetrics(
         accuracy=float(accuracy_score(y_true, y_pred)),
         auc_roc=auc,
         precision=float(precision_score(y_true, y_pred, zero_division=0)),
-        recall=float(recall_score(y_true, y_pred, zero_division=0)),
+        recall=sensitivity,
         f1=float(f1_score(y_true, y_pred, zero_division=0)),
         samples=int(y_true.size),
+        specificity=specificity,
+        balanced_accuracy=0.5 * (sensitivity + specificity),
     )
 
 
@@ -94,9 +135,80 @@ class ConfusionCounts:
         return asdict(self)
 
 
-def confusion_counts(y_true: np.ndarray, probabilities: np.ndarray) -> ConfusionCounts:
+def confusion_counts(
+    y_true: np.ndarray, probabilities: np.ndarray, decision_threshold: float = 0.5
+) -> ConfusionCounts:
+    """Integer confusion counts, binarised at ``decision_threshold``.
+
+    This configurable probability threshold belongs to the software evaluator.
+    The shipped binary-linear circuit derives its own predictions from a fixed
+    zero-logit comparison; it does not prove arbitrary software thresholds.
+    """
+
     y_true = np.asarray(y_true).astype(int)
-    y_pred = (np.asarray(probabilities, dtype=np.float64) >= 0.5).astype(int)
+    y_pred = (_scored_probabilities(probabilities) >= decision_threshold).astype(int)
+    return ConfusionCounts(
+        tp=int(np.sum((y_pred == 1) & (y_true == 1))),
+        tn=int(np.sum((y_pred == 0) & (y_true == 0))),
+        fp=int(np.sum((y_pred == 1) & (y_true == 0))),
+        fn=int(np.sum((y_pred == 0) & (y_true == 1))),
+    )
+
+
+def positive_count_for_rate(predicted_positive_rate: float, rows: int) -> int:
+    """How many of ``rows`` challenge rows a stated predicted-positive rate declares.
+
+    Rounded half up rather than with numpy's banker's rounding, because the prover
+    and the verifier have to land on the same integer from the same public rate and
+    the same row count, and half-up is the rule that is trivial to restate.
+    """
+
+    if rows <= 0:
+        return 0
+    count = int(np.floor(float(predicted_positive_rate) * rows + 0.5))
+    return int(min(max(count, 0), rows))
+
+
+def confusion_counts_at_rate(
+    y_true: np.ndarray, probabilities: np.ndarray, predicted_positive_rate: float
+) -> ConfusionCounts | None:
+    """Integer confusion counts under a stated predicted-positive *rate*.
+
+    The threshold rule fixes the probability above which a row counts as positive
+    and lets the number of positives fall where it may. This fixes the number and
+    lets the threshold fall where it may: ``k = round(rate * n)`` rows are declared
+    positive, and which ones follows from the model's own ranking. A single public
+    rate therefore means the same thing to every prover regardless of how its local
+    score scale sits, which a single public threshold does not.
+
+    This rate rule is implemented in software only. A possible circuit extension
+    would compare each score with a private threshold and enforce ``TP + FP = k``
+    for a public ``k``. That extension would require a revised public instance,
+    relation and matching proving/verifying keys; it is not implemented by the
+    shipped zero-logit binary-linear circuit.
+
+    ``None`` is returned when no ``t`` declares exactly ``k`` rows positive, which
+    happens when equal scores straddle the boundary. A constant-output model can
+    realise only counts 0 and n, so no threshold selects an interior ``k``. Row
+    index tie-breaking would select predictions unsupported by a score threshold
+    and is deliberately excluded.
+    """
+
+    y_true = np.asarray(y_true).astype(int)
+    scores = _scored_probabilities(probabilities)
+    rows = int(scores.size)
+    count = positive_count_for_rate(predicted_positive_rate, rows)
+    if rows == 0 or count == 0:
+        return None
+    order = np.argsort(-scores, kind="stable")
+    threshold = float(scores[order[count - 1]])
+    # A witness exists only when the k-th highest score is strictly above the
+    # (k+1)-th, so that ``score >= t`` selects exactly k rows and not more.
+    if count < rows and scores[order[count]] >= threshold:
+        return None
+    y_pred = (scores >= threshold).astype(int)
+    if int(y_pred.sum()) != count:
+        return None
     return ConfusionCounts(
         tp=int(np.sum((y_pred == 1) & (y_true == 1))),
         tn=int(np.sum((y_pred == 0) & (y_true == 0))),
@@ -151,13 +263,14 @@ def predicate_margin(
     threshold_sensitivity: float,
     threshold_specificity: float,
 ) -> float:
-    """Scalar utility margin by which a submission clears the admission predicate.
+    """Nonnegative utility margin above the nominal predicate thresholds.
 
-    Mirrors Eq. (5) of the paper. Under ``raw_accuracy`` the margin is the
+    Mirrors Eq. (2) of the paper. Under ``raw_accuracy`` the margin is the
     accuracy surplus over ``threshold``. Under ``class_aware`` it is the
     *smaller* of the two per-class surpluses, so an agent cannot bank reputation
-    by excelling on the majority class alone. Clamped at zero: a rejected
-    submission earns nothing.
+    by excelling on the majority class alone. Admission tolerance does not lower
+    these reward thresholds. The caller applies the margin only after admission;
+    a submission within the tolerance band is accepted with zero reward.
     """
     if predicate == "class_aware":
         return max(
@@ -176,7 +289,7 @@ def max_predicate_margin(
     threshold_sensitivity: float,
     threshold_specificity: float,
 ) -> float:
-    """Delta_max of Eq. (6): the largest attainable predicate margin."""
+    """Delta_max of Eq. (3): the largest attainable predicate margin."""
     if predicate == "class_aware":
         return 1.0 - max(threshold_sensitivity, threshold_specificity)
     return 1.0 - threshold
