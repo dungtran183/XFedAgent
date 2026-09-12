@@ -571,7 +571,7 @@ copied verbatim into each run directory, and `summary.json` records a
 
 | Section | Reported setting |
 |---|---|
-| `data` | 26 424 samples, 10 clients, 24 timesteps, 17 features, validation pool 1 000, Dirichlet α = 0.5, 70/15/15 split |
+| `data` | 27,344 samples, 10 clients, 24 timesteps, 17 features, validation pool 1 000, Dirichlet α = 0.5, 70/15/15 split |
 | `model` | 1D-CNN, channels 8/16/32, Adam, lr 1e-3, weight decay 1e-4, batch 32, `E = 5` local epochs, 8-bit quantisation, copy ε = 1e-4 |
 | `pov` | class-aware predicate, τ_sens = τ_spec = 0.65 (calibrated, §3c), `|D_val|` = 100 drawn class-balanced, tolerance ε = 0.03, per-round rotation, 0.184 s/sample modelled proving |
 | `federation` | 100 rounds, 10 clients/round, 30 % Byzantine, attacks {label_flip, random_gradient, alie, minmax, backdoor}, r₀ = 0.5, r_min = 0.2, α = 0.1, β = 0.5 |
